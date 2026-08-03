@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/EnfonoTech/zatca_api/docs/schema/feed.schema.json",
+  "title": "ZATCA API pull feed response",
+  "description": "The response shape for pull mode, where we poll your endpoint instead of you calling us. Every key name here is configurable on our side -- these are just the defaults. Tell us your names and we will match them.",
+  "type": "object",
+  "required": [
+    "status",
+    "payloads"
+  ],
+  "properties": {
+    "status": {
+      "const": "success",
+      "description": "Anything else and we skip the batch and log it rather than importing."
+    },
+    "payloads": {
+      "type": "array",
+      "description": "The invoices. An empty array is valid and means nothing new.",
+      "items": {
+        "$ref": "invoice.schema.json"
+      }
+    },
+    "meta": {
+      "type": "object",
+      "description": "Optional. Include next_cursor if your feed is paginated.",
+      "properties": {
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "total": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

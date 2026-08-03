@@ -30,7 +30,7 @@ creates invoices over REST and simply reports `zatca.available = false`.
 ## Install
 
 ```bash
-bench get-app https://github.com/sivajyothis7/zatca_api.git
+bench get-app https://github.com/EnfonoTech/zatca_api.git
 bench --site <site> install-app zatca_api
 bench --site <site> migrate
 ```
@@ -54,6 +54,7 @@ curl -H "Authorization: token <api_key>:<api_secret>" \
 
 | Method | Endpoint | Purpose |
 |---|---|---|
+| POST | `zatca_api.api.v1.validate_payload` | **Dry run** — validate, writing nothing |
 | POST | `zatca_api.api.v1.create_invoice` | Create + submit an invoice, return the QR |
 | POST | `zatca_api.api.v1.create_credit_note` | Create a credit note (`is_return`) |
 | POST | `zatca_api.api.v1.submit_invoice` | Submit an existing draft |
@@ -67,6 +68,13 @@ curl -H "Authorization: token <api_key>:<api_secret>" \
 Full request/response reference, error codes and worked examples:
 **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)**, also served from the site at
 `/user-guide`.
+
+Building the feed on the other side? Send them
+**[docs/DATA_CONTRACT.md](docs/DATA_CONTRACT.md)** plus
+[`docs/schema/`](docs/schema/) and [`docs/samples/`](docs/samples/), and have them
+self-test against `validate_payload` — a dry run that reports every problem, the real
+totals, and whether the invoice would file as standard or simplified, while writing
+nothing to the database.
 
 A Postman collection and environment are in [`postman/`](postman/).
 

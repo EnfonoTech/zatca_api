@@ -2,7 +2,7 @@
   "info": {
     "name": "ZATCA API (ERPNext)",
     "_postman_id": "b7f1c2d4-5e6a-4b8c-9d0e-1f2a3b4c5d6e",
-    "description": "# ZATCA API\n\nREST bridge for creating ERPNext Sales Invoices from an external system and getting the **ZATCA QR code** back in the same response.\n\n## Setup\n\n1. Open the **ZATCA API** environment and fill in `base_url`, `api_key`, `api_secret`, `company`, `customer`, `item_code`.\n2. Generate the key pair in ERPNext: **User > (your API user) > Settings > API Access > Generate Keys**. The secret is shown once.\n3. Run **01 Ping** first. It reports whether authentication works, whether the custom fields are migrated, and which ZATCA phase each company resolves to.\n4. Then run the requests in order - later ones reuse `last_invoice` and `external_id` captured by earlier ones.\n\n## Response shape\n\nFrappe wraps every whitelisted return value in `message`, so the envelope is at `message`:\n\n```json\n{\n  \"message\": {\n    \"success\": true,\n    \"request_id\": \"a1b2c3d4e5f6\",\n    \"timestamp\": \"2026-08-04 11:30:00\",\n    \"data\": { \"invoice\": { ... }, \"zatca\": { ... } },\n    \"warnings\": [],\n    \"errors\": []\n  }\n}\n```\n\nThe shape is identical for success and failure, so one parser handles both.\n\n## The zatca block\n\n`data.zatca` is **always present**. Check `available`:\n\n| Field | Phase 1 | Phase 2 |\n| --- | --- | --- |\n| `phase` | `Phase 1` | `Phase 2` |\n| `qr_content` | null (helper returns an image only) | base64 TLV string |\n| `qr_format` | `png-only` | `base64-tlv` |\n| `qr_png_base64` | yes | yes |\n| `uuid` / `invoice_hash` | null (no filing) | yes |\n| `integration_status` | `Not Applicable` | ZATCA outcome, asynchronous |\n\nWhen `available` is false, `reason` says why - most often the invoice is still in Draft, or the company has no ZATCA settings.\n\n## Timing\n\nThe UUID, invoice hash, PIH and QR are computed **locally at submission** and are in the create response immediately. Only `integration_status` moves asynchronously, because the clearance/reporting call to ZATCA runs in a background job. Poll **10 Get ZATCA status** for it.\n\n## HTTP status codes\n\n`200` ok - `400` validation_error - `401` unauthorized - `403` forbidden (also returned for a wrong HTTP verb) - `404` not_found - `409` duplicate / immutable_document - `424` zatca_unavailable - `502` upstream_error - `503` app_disabled - `500` internal_error\n",
+    "description": "# ZATCA API\n\nREST bridge for creating ERPNext Sales Invoices from an external system and getting the **ZATCA QR code** back in the same response.\n\n## Setup\n\n1. Open the **ZATCA API** environment and fill in `base_url`, `api_key`, `api_secret`, `company`, `customer`, `item_code`.\n2. Generate the key pair in ERPNext: **User > (your API user) > Settings > API Access > Generate Keys**. The secret is shown once.\n3. Run **01 Ping** first. It reports whether authentication works, whether the custom fields are migrated, and which ZATCA phase each company resolves to.\n4. Then run **02 Validate payload** \u2014 a dry run that writes nothing. Iterate on your payload there until it is clean before creating anything real. See `docs/DATA_CONTRACT.md`.\n4. Then run the requests in order - later ones reuse `last_invoice` and `external_id` captured by earlier ones.\n\n## Response shape\n\nFrappe wraps every whitelisted return value in `message`, so the envelope is at `message`:\n\n```json\n{\n  \"message\": {\n    \"success\": true,\n    \"request_id\": \"a1b2c3d4e5f6\",\n    \"timestamp\": \"2026-08-04 11:30:00\",\n    \"data\": { \"invoice\": { ... }, \"zatca\": { ... } },\n    \"warnings\": [],\n    \"errors\": []\n  }\n}\n```\n\nThe shape is identical for success and failure, so one parser handles both.\n\n## The zatca block\n\n`data.zatca` is **always present**. Check `available`:\n\n| Field | Phase 1 | Phase 2 |\n| --- | --- | --- |\n| `phase` | `Phase 1` | `Phase 2` |\n| `qr_content` | null (helper returns an image only) | base64 TLV string |\n| `qr_format` | `png-only` | `base64-tlv` |\n| `qr_png_base64` | yes | yes |\n| `uuid` / `invoice_hash` | null (no filing) | yes |\n| `integration_status` | `Not Applicable` | ZATCA outcome, asynchronous |\n\nWhen `available` is false, `reason` says why - most often the invoice is still in Draft, or the company has no ZATCA settings.\n\n## Timing\n\nThe UUID, invoice hash, PIH and QR are computed **locally at submission** and are in the create response immediately. Only `integration_status` moves asynchronously, because the clearance/reporting call to ZATCA runs in a background job. Poll **10 Get ZATCA status** for it.\n\n## HTTP status codes\n\n`200` ok - `400` validation_error - `401` unauthorized - `403` forbidden (also returned for a wrong HTTP verb) - `404` not_found - `409` duplicate / immutable_document - `424` zatca_unavailable - `502` upstream_error - `503` app_disabled - `500` internal_error\n",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -126,7 +126,145 @@
       ]
     },
     {
-      "name": "02 Create invoice (minimal)",
+      "name": "02 Validate payload \u2014 dry run (START HERE)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.validate_payload"
+        },
+        "description": "The onboarding endpoint. **Nothing is written to the database.**\n\nPOST exactly the JSON you intend to send for real. You get back every missing or invalid field, the real ERPNext totals, which master records would be created, and whether the invoice would file with ZATCA as *standard* or *simplified*.\n\nRun this until `valid` is true, `errors` is empty and `zatca_readiness.blocking` is empty. Only then send a real invoice.\n\nCheck the Postman console for the full breakdown. Add `?document_type=Credit Note` to validate a return.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{external_id}}\",\n  \"customer\": \"{{customer}}\",\n  \"company\": \"{{company}}\",\n  \"tax_id\": \"{{buyer_vat}}\",\n  \"posting_date\": \"{{posting_date}}\",\n  \"posting_time\": \"11:30:00\",\n  \"address_title\": \"{{customer}} Billing\",\n  \"address_parts\": {\n    \"street\": \"Olaya Street\",\n    \"building_number\": \"4521\",\n    \"district\": \"Al Murabba\",\n    \"city\": \"Riyadh\",\n    \"postal_code\": \"12613\",\n    \"country\": \"Saudi Arabia\"\n  },\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"item_name\": \"Consulting services\",\n      \"qty\": 10,\n      \"rate\": 450,\n      \"uom\": \"Nos\"\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set(\"external_id\", \"PM-\" + Date.now());",
+              ""
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const env = pm.response.json().message;",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const d = env.data;",
+              "",
+              "// `valid` is the verdict. A 200 only means the check ran, not that the payload is good.",
+              "console.log(\"valid:\", d.valid);",
+              "if (!d.valid) {",
+              "    d.errors.forEach(e => console.error(`${e.code}: ${e.message}`, e.details || \"\"));",
+              "}",
+              "if (d.warnings.length) console.warn(\"warnings:\", d.warnings.join(\" | \"));",
+              "",
+              "console.log(\"totals:\", JSON.stringify(d.totals));",
+              "console.log(\"would create:\", JSON.stringify(d.would_create));",
+              "console.log(\"zatca:\", d.zatca.invoice_type, \"-\", d.zatca.reason);",
+              "console.log(\"would be rejected by ZATCA:\", d.zatca_readiness.would_be_rejected_by_zatca);",
+              "d.zatca_readiness.blocking.forEach(b => pm.expect.fail(`ZATCA blocker: ${b}`));",
+              "",
+              "pm.test(\"payload is valid\", () => pm.expect(d.valid, JSON.stringify(d.errors)).to.be.true);",
+              "pm.test(\"nothing was written\", () => pm.expect(d.dry_run).to.be.true);",
+              "pm.test(\"no ZATCA blockers\", () =>",
+              "    pm.expect(d.zatca_readiness.blocking, JSON.stringify(d.zatca_readiness.blocking))",
+              "      .to.be.an(\"array\").that.is.empty);",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Validate payload \u2014 deliberately broken",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.validate_payload"
+        },
+        "description": "The same endpoint with a 3-digit building number and a 4-digit postal code \u2014 both ZATCA rejections.\n\nExpect `zatca_readiness.blocking` to be populated, and the tests below to fail on purpose. This shows you what a problem looks like *before* ZATCA rejects a real invoice. Read the console output.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{external_id}}\",\n  \"customer\": \"{{customer}}\",\n  \"company\": \"{{company}}\",\n  \"tax_id\": \"{{buyer_vat}}\",\n  \"posting_date\": \"{{posting_date}}\",\n  \"address_parts\": {\n    \"street\": \"Olaya Street\",\n    \"building_number\": \"521\",\n    \"city\": \"Riyadh\",\n    \"postal_code\": \"1261\"\n  },\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"qty\": 1,\n      \"rate\": 450\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set(\"external_id\", \"PM-\" + Date.now());",
+              ""
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const env = pm.response.json().message;",
+              "const d = env.data;",
+              "pm.test(\"HTTP 200 \u2014 the check ran\", () => pm.response.to.have.status(200));",
+              "console.warn(\"warnings:\", d.warnings.join(\" | \"));",
+              "console.warn(\"ZATCA blockers:\", JSON.stringify(d.zatca_readiness.blocking, null, 2));",
+              "pm.test(\"ZATCA problems were detected (this is the point)\", () =>",
+              "    pm.expect(d.warnings.length + d.zatca_readiness.blocking.length).to.be.above(0));",
+              "pm.test(\"still nothing written\", () => pm.expect(d.dry_run).to.be.true);",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Create invoice (minimal)",
       "request": {
         "method": "POST",
         "header": [
@@ -208,7 +346,7 @@
       ]
     },
     {
-      "name": "03 Create invoice (full B2B + address)",
+      "name": "05 Create invoice (full B2B + address)",
       "request": {
         "method": "POST",
         "header": [
@@ -290,7 +428,7 @@
       ]
     },
     {
-      "name": "04 Create invoice (legacy key names)",
+      "name": "06 Create invoice (legacy key names)",
       "request": {
         "method": "POST",
         "header": [
@@ -372,7 +510,7 @@
       ]
     },
     {
-      "name": "05 Idempotency check (re-send same id)",
+      "name": "07 Idempotency check (re-send same id)",
       "request": {
         "method": "POST",
         "header": [
@@ -428,7 +566,7 @@
       ]
     },
     {
-      "name": "06 Create credit note",
+      "name": "08 Create credit note",
       "request": {
         "method": "POST",
         "header": [
@@ -485,7 +623,7 @@
       ]
     },
     {
-      "name": "07 Create draft only (submit=false)",
+      "name": "09 Create draft only (submit=false)",
       "request": {
         "method": "POST",
         "header": [
@@ -542,7 +680,7 @@
       ]
     },
     {
-      "name": "08 Submit the draft",
+      "name": "10 Submit the draft",
       "request": {
         "method": "POST",
         "header": [
@@ -597,7 +735,7 @@
       ]
     },
     {
-      "name": "09 Get invoice",
+      "name": "11 Get invoice",
       "request": {
         "method": "GET",
         "header": [
@@ -645,7 +783,7 @@
       ]
     },
     {
-      "name": "10 Get ZATCA status (poll this)",
+      "name": "12 Get ZATCA status (poll this)",
       "request": {
         "method": "GET",
         "header": [
@@ -694,7 +832,7 @@
       ]
     },
     {
-      "name": "11 List invoices",
+      "name": "13 List invoices",
       "request": {
         "method": "GET",
         "header": [
@@ -759,7 +897,7 @@
       ]
     },
     {
-      "name": "12 List only ZATCA-rejected invoices",
+      "name": "14 List only ZATCA-rejected invoices",
       "request": {
         "method": "GET",
         "header": [
@@ -819,7 +957,7 @@
       ]
     },
     {
-      "name": "13 Resubmit to ZATCA",
+      "name": "15 Resubmit to ZATCA",
       "request": {
         "method": "POST",
         "header": [
@@ -873,7 +1011,7 @@
       ]
     },
     {
-      "name": "14 Trigger a pull source",
+      "name": "16 Trigger a pull source",
       "request": {
         "method": "POST",
         "header": [
@@ -927,7 +1065,7 @@
       ]
     },
     {
-      "name": "15 Error: missing required fields",
+      "name": "17 Error: missing required fields",
       "request": {
         "method": "POST",
         "header": [
@@ -978,7 +1116,7 @@
       ]
     },
     {
-      "name": "16 Error: unknown invoice",
+      "name": "18 Error: unknown invoice",
       "request": {
         "method": "GET",
         "header": [

@@ -1,0 +1,85 @@
+{
+  "status": "success",
+  "meta": {
+    "total": 2,
+    "next_cursor": null
+  },
+  "payloads": [
+    {
+      "external_id": "INV-2026-0001",
+      "customer": "Al Rajhi Trading Est",
+      "company": "Enfono KSA",
+      "tax_id": "300000000000003",
+      "posting_date": "2026-08-04",
+      "posting_time": "11:30:00",
+      "due_date": "2026-09-03",
+      "currency": "SAR",
+      "po_no": "PO-4471",
+      "address_title": "Al Rajhi Trading Est - Billing",
+      "address_parts": {
+        "street": "Olaya Street",
+        "additional_street": "Al Murabba",
+        "building_number": "4521",
+        "district": "Al Murabba",
+        "city": "Riyadh",
+        "postal_code": "12613",
+        "country": "Saudi Arabia"
+      },
+      "items": [
+        {
+          "item_code": "SVC-IMPL",
+          "item_name": "Implementation services",
+          "description": "ERP implementation retainer, August 2026",
+          "qty": 10,
+          "rate": 450,
+          "uom": "Nos",
+          "item_tax_template": "KSA VAT 15% - EK"
+        },
+        {
+          "item_code": "SVC-ONSITE",
+          "item_name": "Onsite support day",
+          "qty": 2,
+          "rate": 1200,
+          "uom": "Nos",
+          "discount_percentage": 10,
+          "item_tax_template": "KSA VAT 15% - EK"
+        }
+      ],
+      "taxes": [
+        {
+          "account_head": "VAT 15% - EK",
+          "charge_type": "On Net Total",
+          "rate": 15,
+          "description": "VAT 15%"
+        }
+      ]
+    },
+    {
+      "external_id": "POS-2026-88431",
+      "customer": "Walk-in Customer",
+      "company": "Enfono KSA",
+      "posting_date": "2026-08-04",
+      "posting_time": "18:42:11",
+      "currency": "SAR",
+      "is_pos": 1,
+      "payment_mode": "Cash",
+      "payment_amount": 172.5,
+      "items": [
+        {
+          "item_code": "ITEM-COFFEE-500G",
+          "qty": 3,
+          "rate": 50,
+          "uom": "Nos"
+        }
+      ],
+      "taxes": [
+        {
+          "account_head": "VAT 15% - EK",
+          "charge_type": "On Net Total",
+          "rate": 15,
+          "description": "VAT 15%"
+        }
+      ]
+    }
+  ]
+}

@@ -25,7 +25,7 @@ import time
 
 import frappe
 from frappe import _
-from frappe.utils import cint, cstr
+from frappe.utils import cint, cstr, now
 
 from zatca_api.services import invoice as invoice_service
 from zatca_api.services.payload import PayloadError, as_dict, normalise_invoice
@@ -44,43 +44,47 @@ def _dig(data, path: str):
     return current
 
 
-def fetch_source(source) -> tuple:
-    """Call one upstream endpoint. Returns ``(items, error)``.
+def fetch_page(source, context: dict) -> tuple:
+    """Fetch one page. Returns ``(items, next_cursor, error)``.
 
-    ``requests`` is imported lazily so this module still imports on a bench where
-    it is unavailable.
+    ``requests`` is imported lazily so this module still imports on a bench where it
+    is unavailable.
     """
     import requests
 
     started = time.monotonic()
+    url = source.substitute(source.endpoint_url, context)
+
     try:
         response = requests.request(
             method=(source.http_method or 'GET').upper(),
-            url=source.endpoint_url,
+            url=url,
             headers=source.build_headers(),
+            params=source.build_query_params(context),
+            json=source.build_body(context),
             auth=source.build_auth(),
             timeout=source.request_timeout,
             verify=bool(cint(source.verify_ssl)),
         )
     except requests.exceptions.RequestException as exc:
-        return [], f'{type(exc).__name__}: {exc}'
+        return [], None, f'{type(exc).__name__}: {exc}'
 
     duration_ms = int((time.monotonic() - started) * 1000)
 
     if response.status_code != 200:
         # Truncate: an upstream error page can be megabytes of HTML.
-        return [], f'HTTP {response.status_code} after {duration_ms} ms: {response.text[:2000]}'
+        return [], None, f'HTTP {response.status_code} after {duration_ms} ms: {response.text[:2000]}'
 
     try:
         body = response.json()
     except ValueError:
-        return [], f'Response is not JSON: {response.text[:2000]}'
+        return [], None, f'Response is not JSON: {response.text[:2000]}'
 
     if source.status_key:
         actual = cstr(_dig(body, source.status_key))
         expected = cstr(source.status_ok_value)
         if expected and actual != expected:
-            return [], f'Upstream {source.status_key}={actual!r}, expected {expected!r}'
+            return [], None, f'Upstream {source.status_key}={actual!r}, expected {expected!r}'
 
     items = _dig(body, cstr(source.payload_root or '').strip())
     if items is None and not source.payload_root:
@@ -89,9 +93,54 @@ def fetch_source(source) -> tuple:
     if isinstance(items, dict):
         items = [items]
     if not isinstance(items, list):
-        return [], f'Payload root {source.payload_root!r} did not resolve to a list'
+        return [], None, f'Payload root {source.payload_root!r} did not resolve to a list'
 
-    return items, None
+    next_cursor = None
+    if source.pagination_mode == 'Cursor' and source.next_cursor_key:
+        next_cursor = cstr(_dig(body, cstr(source.next_cursor_key).strip()) or '') or None
+
+    return items, next_cursor, None
+
+
+def fetch_source(source) -> tuple:
+    """Fetch every page of a source. Returns ``(items, error, truncated)``.
+
+    Pagination stops on: an empty page, a missing next cursor, or the configured page
+    limit. Hitting the limit sets ``truncated`` -- reported rather than passing
+    silently, because a quietly half-imported feed looks like a complete one.
+    """
+    all_items = []
+    cursor = None
+    truncated = False
+    limit = source.page_limit
+
+    for page_index in range(limit):
+        context = source.page_context(page_index, cursor)
+        items, next_cursor, error = fetch_page(source, context)
+
+        if error:
+            # Report a mid-pagination failure rather than silently keeping a partial
+            # feed: the caller cannot tell a short page from a broken one.
+            return all_items, error, truncated
+
+        all_items.extend(items)
+
+        if not source.pagination_mode or source.pagination_mode == 'None':
+            break
+        if not items:
+            break
+        if source.pagination_mode == 'Cursor':
+            if not next_cursor:
+                break
+            cursor = next_cursor
+        elif len(items) < (cint(source.page_size) or 100):
+            # A short page means the last page, for page/offset styles.
+            break
+
+        if page_index == limit - 1:
+            truncated = True
+
+    return all_items, None, truncated
 
 
 def import_source(source_name: str) -> dict:
@@ -103,7 +152,7 @@ def import_source(source_name: str) -> dict:
     if not cint(source.enabled):
         return {'source': source_name, 'skipped': True, 'reason': 'Source is disabled.'}
 
-    items, error = fetch_source(source)
+    items, error, truncated = fetch_source(source)
     if error:
         _log(source_name, 'Failed', error=error)
         frappe.log_error(
@@ -119,8 +168,18 @@ def import_source(source_name: str) -> dict:
         'imported': 0,
         'skipped': 0,
         'failed': 0,
+        'truncated': truncated,
         'details': [],
     }
+
+    if truncated:
+        # Never let a coverage limit look like full coverage.
+        message = (
+            f'Stopped at the {source.page_limit}-page limit for source {source_name}; '
+            f'more pages may remain unimported. Raise Max Pages or narrow the date window.'
+        )
+        results['warning'] = message
+        frappe.log_error(title=f'ZATCA API pull truncated: {source_name}'[:140], message=message)
 
     for raw in items:
         external_id = None
@@ -176,7 +235,28 @@ def import_source(source_name: str) -> dict:
             )
             _log(source_name, 'Failed', external_id=external_id, error=traceback)
 
+    _advance_watermark(source_name, results)
     return results
+
+
+def _advance_watermark(source_name: str, results: dict) -> None:
+    """Move ``last_pulled_at`` forward, but only after a fully clean pull.
+
+    Advancing it after a partial failure would skip past the documents that failed,
+    so they would never be retried. Leaving it put means the next poll re-reads the
+    same window, and dedup makes the successful ones no-ops.
+    """
+    if results.get('failed') or results.get('error') or results.get('truncated'):
+        return
+
+    settings = frappe.get_doc('ZATCA API Settings')
+    row = settings.get_source(source_name)
+    if not row or row.incremental_mode != 'Date Window':
+        return
+
+    # Child-row field on a non-submittable Single: set it directly, no full save.
+    frappe.db.set_value('ZATCA API Source', row.name, 'last_pulled_at', now(), update_modified=False)
+    frappe.clear_cache(doctype='ZATCA API Settings')
 
 
 def _log(source_name: str, status: str, external_id=None, reference_name=None, error=None) -> None:

@@ -23,13 +23,14 @@ Sales Invoices over REST and get the **ZATCA QR code** back in the response.
 12. [Custom field mapping](#12-custom-field-mapping)
 13. [Troubleshooting](#13-troubleshooting)
 14. [Postman](#14-postman)
+15. [Handing the spec to a vendor](#15-handing-the-spec-to-a-vendor)
 
 ---
 
 ## 1. Install
 
 ```bash
-bench get-app https://github.com/sivajyothis7/zatca_api.git
+bench get-app https://github.com/EnfonoTech/zatca_api.git
 bench --site <site> install-app zatca_api
 bench --site <site> migrate
 ```
@@ -226,6 +227,7 @@ Base path: `https://<site>/api/method/zatca_api.api.v1.`
 
 | Method | Endpoint | Purpose |
 |---|---|---|
+| POST | `validate_payload` | **Dry run** — validate and report, writing nothing |
 | POST | `create_invoice` | Create (+submit) an invoice, return the QR |
 | POST | `create_credit_note` | Create a return / credit note |
 | POST | `submit_invoice` | Submit an existing draft |
@@ -237,6 +239,47 @@ Base path: `https://<site>/api/method/zatca_api.api.v1.`
 | POST | `pull_now` | Trigger a configured pull source |
 
 A wrong HTTP verb returns **403**, not 405 — that is Frappe's behaviour.
+
+### `validate_payload` — dry run
+
+The endpoint to hand to whoever builds the feed. **Nothing is written to the
+database**, so they can hammer it against the live site while iterating.
+
+```bash
+curl -X POST "https://<site>/api/method/zatca_api.api.v1.validate_payload" \
+  -H "Authorization: token $API_KEY:$API_SECRET" \
+  -H "Content-Type: application/json" \
+  -d @invoice.json
+```
+
+Add `"document_type": "Credit Note"` to the body, or `?document_type=Credit%20Note`
+on the URL — both work. (Frappe discards the query string when a JSON body is
+present, so this endpoint reads it off the request directly.)
+
+Response `data`:
+
+| Key | Meaning |
+|---|---|
+| `valid` | The verdict. **A 200 only means the check ran** — always read this. |
+| `errors[]` | Every problem, each naming the exact field. |
+| `warnings[]` | Non-fatal, mostly incomplete buyer address. |
+| `totals` | The **real** ERPNext totals — net, tax, grand, plus each tax row. |
+| `would_create` | Which Customer / Items / UOMs would be new. A large unexpected `new_items` means unstable item codes. |
+| `resolved` | What the payload parsed to, and any existing invoice with that `external_id`. |
+| `zatca` | `invoice_type` (`Standard`/`Simplified`), `buyer_is_b2b`, and the `reason`. |
+| `zatca_readiness` | `would_be_rejected_by_zatca` plus `blocking` and `advisory` lists. |
+| `dry_run` | Always `true`. |
+
+**How it can promise "writes nothing" and still give real totals.** The payload runs
+through the *same* code path as a real request, inside a database savepoint that is
+always rolled back — on every path, including an unexpected exception. So the totals
+come from ERPNext's own `calculate_taxes_and_totals` and the errors from ERPNext's and
+`ksa_compliance`'s own `validate` hooks, rather than a parallel reimplementation that
+could drift and pass payloads that later fail. The invoice is inserted as a **draft
+only**, never submitted, so no GL entry is written and nothing is filed with ZATCA.
+
+It requires the same `create` permission on Sales Invoice as the real endpoint, so it
+cannot be used to probe the site anonymously.
 
 ### `create_invoice`
 
@@ -601,6 +644,16 @@ preferred because it returns the QR synchronously.
 | External ID Key | Which key uniquely identifies the source document. |
 | Timeout | Seconds. Defaults to 30 — never unlimited. |
 | Auto Submit | Submit pulled invoices. Required for a QR. |
+| **Extra Headers** | One `Name: value` per line, for APIs needing more than one custom header. Not encrypted — keep secrets in *Secret / API Key*, which cannot be shadowed from here. |
+| **Query Parameters** | One `key=value` per line. Placeholders substituted. |
+| **Request Body (POST)** | JSON body for a POST-style feed. Placeholders substituted. |
+| **Incremental Mode** | `Date Window` sends a from/to range so you stop refetching the whole history every 15 minutes. |
+| **From / To Parameter**, **Lookback (days)**, **Date Format** | The window. Lookback is re-requested every poll on purpose, so a document the upstream system back-dates after a poll is still picked up; dedup makes the overlap free. |
+| **Last Pulled At** | Read-only watermark. Only advances after a pull with **no** failures and no truncation — otherwise the failed documents would be skipped forever. |
+| **Pagination Mode** | `Page Number`, `Offset` or `Cursor`. Without it only page one is ever imported. |
+| **Page / Offset Parameter**, **Page Size**, **First Page Number** | Zero-based paging is supported — an explicit `0` is honoured. |
+| **Cursor Parameter**, **Next Cursor Key** | Dotted path to the next cursor, e.g. `meta.next_cursor`. Paging stops when it is empty. |
+| **Max Pages** | Hard stop so a bad cursor cannot loop forever. Hitting it sets `truncated` on the result and writes an Error Log entry — a partially imported feed is never reported as complete. |
 
 Then tick **Enable Scheduled Pull**. A cron runs every 15 minutes and is a cheap
 no-op while disabled. Trigger one immediately with `pull_now`.
@@ -685,3 +738,49 @@ bench --site <site> run-tests --app zatca_api
 invoice creation, idempotency, submitted-document immutability, mixed-rate tax
 correctness, credit notes, master-data creation, security guards, and the ZATCA
 bridge for both phases.
+
+---
+
+## 15. Handing the spec to a vendor
+
+When the external team is building *to our requirements*, send them
+**[`DATA_CONTRACT.md`](DATA_CONTRACT.md)** rather than this guide. It is written for
+them: what to send, the ZATCA rules behind each field, the mistakes that cause silent
+compliance defects, and a checklist to sign off against.
+
+Also point them at:
+
+| Artifact | Purpose |
+|---|---|
+| [`schema/invoice.schema.json`](schema/invoice.schema.json) | JSON Schema (2020-12) for offline validation in their own CI |
+| [`schema/feed.schema.json`](schema/feed.schema.json) | Pull-mode response envelope |
+| [`samples/`](samples/) | Worked payloads: standard B2B, B2B without a VAT number, simplified B2C, credit note, mixed VAT rates, minimal |
+| `validate_payload` | Their self-test loop — see §6 |
+
+```bash
+pip install check-jsonschema
+check-jsonschema --schemafile docs/schema/invoice.schema.json their-invoice.json
+```
+
+The schema catches shape and format problems offline. `validate_payload` catches
+everything that needs our data — unknown accounts, unknown tax templates, and the
+standard-vs-simplified classification.
+
+Tests in `zatca_api/tests/test_contract.py` validate every shipped sample against the
+schema **and** against the app's own normaliser, so the published contract cannot
+drift from the code without a test failing.
+
+### Placeholder tokens for pull sources
+
+Usable in the endpoint URL, query parameters and request body:
+
+| Token | Value |
+|---|---|
+| `{from_date}` / `{to_date}` | The incremental window, in the configured `Date Format` |
+| `{page}` | Page number, offset by `First Page Number` |
+| `{offset}` | `page_index × page_size` |
+| `{cursor}` | Cursor from the previous response |
+| `{page_size}` | Configured page size |
+
+Unknown tokens are left untouched, so braces that occur naturally in a URL or JSON
+body are safe.

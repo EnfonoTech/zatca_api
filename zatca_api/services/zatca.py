@@ -402,3 +402,85 @@ def resubmit(invoice_name: str, doctype: str = 'Sales Invoice') -> dict:
         'previous_integration_status': row['integration_status'],
         'message': _('Resubmission queued with ksa_compliance.'),
     }
+
+
+# ZATCA Business Settings.type_of_business_transactions decides whether an invoice
+# is cleared as *standard* or reported as *simplified*. The controller exposes it as
+# the `invoice_mode` property; these are its stored values.
+# Source: ksa_compliance/invoice.py::InvoiceMode (ksa_compliance 0.58.0)
+INVOICE_MODE_AUTO = 'Let the system decide (both)'
+INVOICE_MODE_SIMPLIFIED = 'Simplified Tax Invoices'
+INVOICE_MODE_STANDARD = 'Standard Tax Invoices'
+
+
+def classify_invoice_type(company: str, customer: str | None = None) -> dict:
+    """Predict whether an invoice would be Standard (B2B) or Simplified (B2C).
+
+    This is what the dry-run endpoint reports back so an integrator can see, before
+    sending anything real, which ZATCA track their payload lands on -- the two have
+    very different field requirements.
+
+    Mirrors ``SalesInvoiceAdditionalFields._get_invoice_type``: the company setting
+    wins outright, otherwise it comes down to ``is_b2b_customer(customer)``.
+    """
+    result = {'invoice_type': None, 'reason': None, 'buyer_is_b2b': None, 'invoice_mode': None}
+
+    if not is_ksa_compliance_installed():
+        result['reason'] = 'ksa_compliance is not installed, so no ZATCA classification applies.'
+        return result
+
+    settings_name = frappe.db.get_value(
+        'ZATCA Business Settings', {'company': company, 'status': 'Active'}, 'name'
+    )
+    if not settings_name:
+        result['reason'] = f'No active ZATCA Business Settings for company {company} (Phase 2 not enabled).'
+        return result
+
+    mode = frappe.db.get_value('ZATCA Business Settings', settings_name, 'type_of_business_transactions')
+    result['invoice_mode'] = mode
+
+    if mode == INVOICE_MODE_STANDARD:
+        result['invoice_type'] = 'Standard'
+        result['reason'] = 'Company is configured for Standard Tax Invoices only.'
+    elif mode == INVOICE_MODE_SIMPLIFIED:
+        result['invoice_type'] = 'Simplified'
+        result['reason'] = 'Company is configured for Simplified Tax Invoices only.'
+
+    if not customer or not frappe.db.exists('Customer', customer):
+        if result['invoice_type'] is None:
+            result['reason'] = 'Customer does not exist yet, so B2B status cannot be determined.'
+        return result
+
+    result['buyer_is_b2b'] = _is_b2b(customer)
+
+    if result['invoice_type'] is None:
+        result['invoice_type'] = 'Standard' if result['buyer_is_b2b'] else 'Simplified'
+        result['reason'] = (
+            'Buyer has a VAT registration number or another ZATCA identifier.'
+            if result['buyer_is_b2b']
+            else 'Buyer has no VAT registration number and no other ZATCA identifier, so the '
+            'invoice is treated as B2C. Send tax_id (or buyer_id_type + buyer_id_value) to '
+            'file it as a standard invoice.'
+        )
+    elif result['invoice_type'] == 'Standard' and not result['buyer_is_b2b']:
+        result['reason'] += (
+            ' Warning: the buyer has no VAT number or other identifier, which a standard ' 'invoice requires.'
+        )
+
+    return result
+
+
+def _is_b2b(customer: str) -> bool:
+    """Delegate to ksa_compliance so this cannot drift from its own rule.
+
+    is_b2b_customer() reads Customer.custom_vat_registration_number or a non-empty
+    custom_additional_ids row -- NOT the core tax_id field.
+    """
+    try:
+        from ksa_compliance.ksa_compliance.doctype.sales_invoice_additional_fields.sales_invoice_additional_fields import (
+            is_b2b_customer,
+        )
+    except ImportError:
+        return False
+
+    return bool(is_b2b_customer(frappe.get_doc('Customer', customer)))

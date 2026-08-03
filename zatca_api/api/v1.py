@@ -27,8 +27,8 @@ import frappe
 from frappe import _
 from frappe.utils import cint, cstr, strip_html
 
+from zatca_api.services import dryrun, puller, zatca
 from zatca_api.services import invoice as invoice_service
-from zatca_api.services import puller, zatca
 from zatca_api.services.envelope import (
     ERR_INTERNAL,
     ERR_NOT_FOUND,
@@ -136,6 +136,21 @@ def _reset_request_state() -> None:
     error response. Clearing it keeps each response about its own request.
     """
     frappe.clear_messages()
+
+
+def _query_arg(name: str) -> str:
+    """Read a query-string argument, which ``frappe.form_dict`` may have dropped.
+
+    When a request carries a JSON body, frappe replaces ``form_dict`` wholesale with
+    the parsed body and discards ``request.args`` entirely
+    (frappe/app.py: ``if request_data and request.is_json: args = json.loads(...)``).
+    So a parameter sent in the query string alongside a JSON body is invisible to the
+    normal argument binding, and has to be read off the request directly.
+    """
+    request = getattr(frappe.local, 'request', None)
+    if request is None:
+        return ''
+    return cstr((request.args or {}).get(name) or '')
 
 
 def _body() -> dict:
@@ -356,6 +371,68 @@ def _clean_message(exc) -> str:
             lines.append(line)
 
     return ' '.join(lines)[:2000] or _('Validation failed.')
+
+
+@frappe.whitelist(methods=['POST'])
+def validate_payload(document_type: str | None = None, **kwargs):
+    """Validate a payload and report, **without keeping anything**.
+
+    The onboarding endpoint. Give this to whoever is building the feed: they POST
+    the JSON they intend to send, and get back every missing or invalid field, the
+    real ERPNext totals, what master data would be created, and whether the invoice
+    would file with ZATCA as *standard* or *simplified*.
+
+    The payload runs through the same code path as a real request, inside a database
+    savepoint that is always rolled back -- so the answers come from ERPNext's and
+    ksa_compliance's own validation rather than a parallel reimplementation that
+    could drift. The invoice is inserted as a draft only, never submitted, so no GL
+    entry is written and nothing is filed with ZATCA.
+
+    Pass ``document_type: "Credit Note"`` to validate a return -- in the JSON body, or
+    as a query-string argument; both work.
+
+    Requires the same Sales Invoice `create` permission as the real endpoint, so it
+    cannot be used to probe the site anonymously.
+    """
+    request_id = new_request_id()
+    endpoint = 'validate_payload'
+    _reset_request_state()
+    raw = kwargs or _body()
+
+    # Resolve the document type from wherever it arrived, then keep it out of the
+    # invoice payload so it cannot be mistaken for an invoice field.
+    resolved_type = (
+        cstr(raw.pop('document_type', '')).strip()
+        or cstr(document_type or '').strip()
+        or _query_arg('document_type').strip()
+        or 'Sales Invoice'
+    )
+
+    try:
+        settings = get_settings()
+        guard_request(settings, doctype='Sales Invoice', ptype='create')
+    except GuardError as exc:
+        return _handle_guard_error(endpoint, exc, request_id, raw)
+
+    is_return = resolved_type.lower() in ('credit note', 'return', 'credit_note')
+    report = dryrun.dry_run(raw, settings, is_return=is_return)
+
+    # The request itself succeeded even when the payload is invalid -- the caller
+    # asked "is this acceptable?" and got a definitive answer. Errors about the
+    # payload live in `data`, so a 200 here is not a claim that the payload is good.
+    response = success_response(report, request_id, report['warnings'])
+    response['data']['valid'] = report['valid']
+
+    _log_request(
+        endpoint,
+        'Success' if report['valid'] else 'Partial',
+        request_id,
+        payload=raw,
+        response=response,
+        external_id=report['resolved'].get('external_id'),
+        http_status=200,
+    )
+    return response
 
 
 @frappe.whitelist(methods=['POST'])

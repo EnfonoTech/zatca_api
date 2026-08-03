@@ -1,0 +1,411 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/EnfonoTech/zatca_api/docs/schema/invoice.schema.json",
+  "title": "ZATCA API invoice payload",
+  "description": "One invoice as accepted by zatca_api. The same object is used whether you POST it to create_invoice or publish it in a feed we poll. Key names are also matched case- and separator-insensitively, and a number of aliases are accepted, but the names below are canonical -- build to these.",
+  "type": "object",
+  "required": [
+    "external_id",
+    "customer",
+    "items"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "external_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 140,
+      "description": "Your unique, STABLE identifier for this document. Send the same value on a retry and you get the existing invoice back instead of a duplicate. If this changes between retries, duplicates are created.",
+      "examples": [
+        "INV-2026-0001"
+      ]
+    },
+    "customer": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Customer code or name. Created if unknown."
+    },
+    "company": {
+      "type": "string",
+      "description": "Selling company. Omit to use the configured default."
+    },
+    "tax_id": {
+      "type": "string",
+      "pattern": "^3[0-9]{13}3$",
+      "description": "Buyer VAT registration number. ZATCA requires 15 digits starting and ending with 3. Sending this is what makes the invoice a STANDARD (B2B) invoice.",
+      "examples": [
+        "300000000000003"
+      ]
+    },
+    "buyer_id_type": {
+      "type": "string",
+      "enum": [
+        "TIN",
+        "CRN",
+        "MOM",
+        "MLS",
+        "SAG",
+        "NAT",
+        "GCC",
+        "IQA",
+        "PAS",
+        "OTH"
+      ],
+      "description": "ZATCA buyer identification scheme, for a B2B buyer with no VAT number. CRN = commercial registration, NAT = national id, IQA = iqama, PAS = passport."
+    },
+    "buyer_id_value": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The identifier itself. Required when buyer_id_type is sent."
+    },
+    "posting_date": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "description": "Invoice date, YYYY-MM-DD. Defaults to today."
+    },
+    "posting_time": {
+      "type": "string",
+      "pattern": "^[0-9]{2}:[0-9]{2}(:[0-9]{2})?$",
+      "description": "HH:MM:SS. Goes into the ZATCA QR timestamp, so send the real time."
+    },
+    "due_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "currency": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 3,
+      "examples": [
+        "SAR"
+      ]
+    },
+    "conversion_rate": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/item"
+      }
+    },
+    "taxes": {
+      "type": "array",
+      "description": "Omit to use the company's default tax template. ZATCA requires at least one tax row, so either send this or make sure a default template exists.",
+      "items": {
+        "$ref": "#/$defs/tax"
+      }
+    },
+    "tax_template": {
+      "type": "string",
+      "description": "Named tax template instead of `taxes`."
+    },
+    "address_parts": {
+      "$ref": "#/$defs/address"
+    },
+    "address_title": {
+      "type": "string",
+      "description": "Title for the buyer address record."
+    },
+    "address_display": {
+      "type": "string",
+      "description": "Single free-text address line. Only use this if you cannot send address_parts; it has to be parsed with regexes and is less reliable."
+    },
+    "project": {
+      "type": "string"
+    },
+    "po_no": {
+      "type": "string",
+      "description": "Buyer purchase order reference."
+    },
+    "remarks": {
+      "type": "string"
+    },
+    "cost_center": {
+      "type": "string"
+    },
+    "selling_price_list": {
+      "type": "string"
+    },
+    "is_return": {
+      "type": [
+        "boolean",
+        "integer"
+      ],
+      "enum": [
+        true,
+        false,
+        0,
+        1
+      ],
+      "description": "1 for a credit note."
+    },
+    "return_against": {
+      "type": "string",
+      "description": "The original invoice a credit note refers to. Must already be submitted. ZATCA requires a credit note to identify its original."
+    },
+    "is_debit_note": {
+      "type": [
+        "boolean",
+        "integer"
+      ],
+      "enum": [
+        true,
+        false,
+        0,
+        1
+      ]
+    },
+    "is_pos": {
+      "type": [
+        "boolean",
+        "integer"
+      ],
+      "enum": [
+        true,
+        false,
+        0,
+        1
+      ],
+      "description": "Required if payment_mode is sent."
+    },
+    "payment_mode": {
+      "type": "string",
+      "description": "Mode of payment, which supplies the ZATCA payment means code. Requires is_pos = 1, because ERPNext only stores payment rows on a POS invoice."
+    },
+    "payment_amount": {
+      "type": "number",
+      "minimum": 0
+    },
+    "submit": {
+      "type": [
+        "boolean",
+        "integer"
+      ],
+      "enum": [
+        true,
+        false,
+        0,
+        1
+      ],
+      "description": "Overrides the auto-submit setting. A ZATCA QR only exists for a submitted invoice, so leave this alone unless you specifically want a draft."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "buyer_id_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "buyer_id_value"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "payment_mode"
+        ]
+      },
+      "then": {
+        "properties": {
+          "is_pos": {
+            "enum": [
+              true,
+              1
+            ]
+          }
+        },
+        "required": [
+          "is_pos"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "tax_id"
+        ]
+      },
+      "then": {
+        "required": [
+          "address_parts"
+        ],
+        "description": "A buyer VAT number makes this a STANDARD invoice, and ZATCA rejects a standard invoice without a complete buyer address."
+      }
+    }
+  ],
+  "$defs": {
+    "item": {
+      "type": "object",
+      "required": [
+        "item_code",
+        "qty",
+        "rate"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "item_code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "item_name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "qty": {
+          "type": "number",
+          "not": {
+            "const": 0
+          },
+          "description": "Must not be 0. For a credit note send the quantity being returned; positive or negative both work, the sign is normalised."
+        },
+        "rate": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Unit price excluding VAT. Never negative -- use is_return."
+        },
+        "uom": {
+          "type": "string"
+        },
+        "item_tax_template": {
+          "type": "string",
+          "description": "Per-line tax template. Send this whenever lines have different VAT treatment (standard / zero-rated / exempt), otherwise every line is taxed the same and ZATCA gets the wrong per-line VAT category."
+        },
+        "discount_percentage": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "discount_amount": {
+          "type": "number",
+          "minimum": 0
+        },
+        "income_account": {
+          "type": "string"
+        },
+        "cost_center": {
+          "type": "string"
+        },
+        "warehouse": {
+          "type": "string"
+        },
+        "item_group": {
+          "type": "string"
+        }
+      }
+    },
+    "tax": {
+      "type": "object",
+      "required": [
+        "account_head"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "account_head": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Must be an account belonging to the invoice's company."
+        },
+        "charge_type": {
+          "type": "string",
+          "enum": [
+            "On Net Total",
+            "On Previous Row Amount",
+            "On Previous Row Total",
+            "Actual",
+            "On Item Quantity"
+          ],
+          "default": "On Net Total"
+        },
+        "rate": {
+          "type": "number",
+          "minimum": 0
+        },
+        "tax_amount": {
+          "type": "number",
+          "description": "Only for charge_type Actual; every other type uses rate."
+        },
+        "description": {
+          "type": "string"
+        },
+        "included_in_print_rate": {
+          "type": [
+            "boolean",
+            "integer"
+          ],
+          "enum": [
+            true,
+            false,
+            0,
+            1
+          ]
+        }
+      }
+    },
+    "address": {
+      "type": "object",
+      "description": "Buyer address. Every field marked required below is mandatory for a ZATCA STANDARD (B2B) invoice; ZATCA rejects the invoice if any is missing.",
+      "required": [
+        "street",
+        "building_number",
+        "district",
+        "city",
+        "postal_code"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "street": {
+          "type": "string",
+          "minLength": 1
+        },
+        "additional_street": {
+          "type": "string"
+        },
+        "building_number": {
+          "type": "string",
+          "pattern": "^[0-9]{4}$",
+          "description": "Exactly 4 digits. ZATCA rule."
+        },
+        "district": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Neighbourhood."
+        },
+        "city": {
+          "type": "string",
+          "minLength": 1
+        },
+        "postal_code": {
+          "type": "string",
+          "pattern": "^[0-9]{5}$",
+          "description": "Exactly 5 digits. ZATCA rule."
+        },
+        "state": {
+          "type": "string"
+        },
+        "country": {
+          "type": "string",
+          "examples": [
+            "Saudi Arabia"
+          ]
+        },
+        "email": {
+          "type": "string",
+          "format": "email"
+        },
+        "phone": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

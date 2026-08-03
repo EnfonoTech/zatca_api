@@ -1,0 +1,25 @@
+{
+  "external_id": "INV-2026-0002",
+  "customer": "Government Agency X",
+  "company": "Enfono KSA",
+  "buyer_id_type": "SAG",
+  "buyer_id_value": "1010101010",
+  "posting_date": "2026-08-04",
+  "address_title": "Government Agency X - Billing",
+  "address_parts": {
+    "street": "King Fahd Road",
+    "building_number": "0521",
+    "district": "Al Olaya",
+    "city": "Riyadh",
+    "postal_code": "11564",
+    "country": "Saudi Arabia"
+  },
+  "items": [
+    {
+      "item_code": "SVC-IMPL",
+      "qty": 1,
+      "rate": 5000,
+      "uom": "Nos"
+    }
+  ]
+}

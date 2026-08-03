@@ -1,0 +1,35 @@
+{
+  "external_id": "CN-2026-0007",
+  "customer": "Al Rajhi Trading Est",
+  "company": "Enfono KSA",
+  "tax_id": "300000000000003",
+  "posting_date": "2026-08-10",
+  "is_return": 1,
+  "return_against": "ACC-SINV-2026-00051",
+  "remarks": "Two onsite days cancelled by the customer",
+  "address_title": "Al Rajhi Trading Est - Billing",
+  "address_parts": {
+    "street": "Olaya Street",
+    "building_number": "4521",
+    "district": "Al Murabba",
+    "city": "Riyadh",
+    "postal_code": "12613",
+    "country": "Saudi Arabia"
+  },
+  "items": [
+    {
+      "item_code": "SVC-ONSITE",
+      "qty": 2,
+      "rate": 1200,
+      "uom": "Nos"
+    }
+  ],
+  "taxes": [
+    {
+      "account_head": "VAT 15% - EK",
+      "charge_type": "On Net Total",
+      "rate": 15,
+      "description": "VAT 15%"
+    }
+  ]
+}

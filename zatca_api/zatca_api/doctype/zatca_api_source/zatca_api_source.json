@@ -26,6 +26,29 @@
   "external_id_key",
   "timeout",
   "verify_ssl",
+  "section_request",
+  "custom_headers",
+  "query_params",
+  "column_break_request",
+  "request_body",
+  "section_incremental",
+  "incremental_mode",
+  "from_param",
+  "to_param",
+  "column_break_incremental",
+  "lookback_days",
+  "date_format",
+  "last_pulled_at",
+  "section_pagination",
+  "pagination_mode",
+  "page_param",
+  "start_page",
+  "column_break_pagination",
+  "page_size_param",
+  "page_size",
+  "cursor_param",
+  "next_cursor_key",
+  "max_pages",
   "auto_submit"
  ],
  "fields": [
@@ -166,6 +189,162 @@
    "fieldname": "auto_submit",
    "fieldtype": "Check",
    "label": "Auto Submit"
+  },
+  {
+   "fieldname": "section_request",
+   "fieldtype": "Section Break",
+   "label": "Request Shaping",
+   "collapsible": 1,
+   "description": "Placeholders usable in URL, query params and body: <code>{from_date}</code>, <code>{to_date}</code>, <code>{page}</code>, <code>{offset}</code>, <code>{cursor}</code>, <code>{page_size}</code>."
+  },
+  {
+   "fieldname": "custom_headers",
+   "fieldtype": "Small Text",
+   "label": "Extra Headers",
+   "description": "One <code>Name: value</code> per line. Use this when the API needs more than the single auth header above, e.g. a tenant id. Do not put secrets here \u2014 this field is not encrypted; use Secret / API Key for those."
+  },
+  {
+   "fieldname": "query_params",
+   "fieldtype": "Small Text",
+   "label": "Query Parameters",
+   "description": "One <code>key=value</code> per line. Placeholders are substituted."
+  },
+  {
+   "fieldname": "column_break_request",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "request_body",
+   "fieldtype": "Code",
+   "options": "JSON",
+   "label": "Request Body (POST)",
+   "depends_on": "eval:doc.http_method=='POST'",
+   "description": "JSON sent as the POST body. Placeholders are substituted before sending."
+  },
+  {
+   "fieldname": "section_incremental",
+   "fieldtype": "Section Break",
+   "label": "Incremental Pull",
+   "collapsible": 1,
+   "description": "Without this every poll refetches the entire feed. Dedup still prevents duplicate invoices, but the transfer grows without bound."
+  },
+  {
+   "fieldname": "incremental_mode",
+   "fieldtype": "Select",
+   "label": "Incremental Mode",
+   "options": "None\nDate Window",
+   "default": "None"
+  },
+  {
+   "fieldname": "from_param",
+   "fieldtype": "Data",
+   "label": "From Parameter",
+   "depends_on": "eval:doc.incremental_mode=='Date Window'",
+   "description": "Query parameter carrying the window start, e.g. <code>from_date</code>."
+  },
+  {
+   "fieldname": "to_param",
+   "fieldtype": "Data",
+   "label": "To Parameter",
+   "depends_on": "eval:doc.incremental_mode=='Date Window'",
+   "description": "Leave blank to send only the start of the window."
+  },
+  {
+   "fieldname": "column_break_incremental",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "lookback_days",
+   "fieldtype": "Int",
+   "label": "Lookback (days)",
+   "default": "7",
+   "depends_on": "eval:doc.incremental_mode=='Date Window'",
+   "description": "Overlap re-requested on every poll, so a document that arrived late upstream is still picked up. Also the window used on the very first pull."
+  },
+  {
+   "fieldname": "date_format",
+   "fieldtype": "Data",
+   "label": "Date Format",
+   "default": "%Y-%m-%d",
+   "depends_on": "eval:doc.incremental_mode=='Date Window'",
+   "description": "strftime format. Use <code>%Y-%m-%dT%H:%M:%S</code> for a timestamp API."
+  },
+  {
+   "fieldname": "last_pulled_at",
+   "fieldtype": "Datetime",
+   "label": "Last Pulled At",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "Watermark, advanced only after a pull with no failures."
+  },
+  {
+   "fieldname": "section_pagination",
+   "fieldtype": "Section Break",
+   "label": "Pagination",
+   "collapsible": 1,
+   "description": "Without this only the first page is ever imported \u2014 silently."
+  },
+  {
+   "fieldname": "pagination_mode",
+   "fieldtype": "Select",
+   "label": "Pagination Mode",
+   "options": "None\nPage Number\nOffset\nCursor",
+   "default": "None"
+  },
+  {
+   "fieldname": "page_param",
+   "fieldtype": "Data",
+   "label": "Page / Offset Parameter",
+   "default": "page",
+   "depends_on": "eval:doc.pagination_mode=='Page Number' || doc.pagination_mode=='Offset'"
+  },
+  {
+   "fieldname": "start_page",
+   "fieldtype": "Int",
+   "label": "First Page Number",
+   "default": "1",
+   "depends_on": "eval:doc.pagination_mode=='Page Number'",
+   "description": "Some APIs number pages from 0."
+  },
+  {
+   "fieldname": "column_break_pagination",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "page_size_param",
+   "fieldtype": "Data",
+   "label": "Page Size Parameter",
+   "default": "page_size",
+   "depends_on": "eval:doc.pagination_mode!='None'"
+  },
+  {
+   "fieldname": "page_size",
+   "fieldtype": "Int",
+   "label": "Page Size",
+   "default": "100",
+   "depends_on": "eval:doc.pagination_mode!='None'"
+  },
+  {
+   "fieldname": "cursor_param",
+   "fieldtype": "Data",
+   "label": "Cursor Parameter",
+   "default": "cursor",
+   "depends_on": "eval:doc.pagination_mode=='Cursor'"
+  },
+  {
+   "fieldname": "next_cursor_key",
+   "fieldtype": "Data",
+   "label": "Next Cursor Key",
+   "depends_on": "eval:doc.pagination_mode=='Cursor'",
+   "description": "Dotted path to the next cursor in the response, e.g. <code>meta.next_cursor</code>. Pulling stops when it is absent or empty."
+  },
+  {
+   "fieldname": "max_pages",
+   "fieldtype": "Int",
+   "label": "Max Pages",
+   "default": "20",
+   "depends_on": "eval:doc.pagination_mode!='None'",
+   "description": "Hard stop, so a misconfigured cursor cannot loop forever. Truncation is logged rather than passing silently."
   }
  ],
  "index_web_pages_for_search": 1,

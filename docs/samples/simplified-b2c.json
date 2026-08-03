@@ -1,0 +1,27 @@
+{
+  "external_id": "POS-2026-88431",
+  "customer": "Walk-in Customer",
+  "company": "Enfono KSA",
+  "posting_date": "2026-08-04",
+  "posting_time": "18:42:11",
+  "currency": "SAR",
+  "is_pos": 1,
+  "payment_mode": "Cash",
+  "payment_amount": 172.5,
+  "items": [
+    {
+      "item_code": "ITEM-COFFEE-500G",
+      "qty": 3,
+      "rate": 50,
+      "uom": "Nos"
+    }
+  ],
+  "taxes": [
+    {
+      "account_head": "VAT 15% - EK",
+      "charge_type": "On Net Total",
+      "rate": 15,
+      "description": "VAT 15%"
+    }
+  ]
+}

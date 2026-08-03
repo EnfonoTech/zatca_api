@@ -1,0 +1,11 @@
+{
+  "external_id": "INV-2026-0004",
+  "customer": "Cash Customer",
+  "items": [
+    {
+      "item_code": "SVC-IMPL",
+      "qty": 1,
+      "rate": 100
+    }
+  ]
+}

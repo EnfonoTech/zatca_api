@@ -1,0 +1,40 @@
+{
+  "external_id": "INV-2026-0003",
+  "customer": "Export Client LLC",
+  "company": "Enfono KSA",
+  "tax_id": "300000000000003",
+  "posting_date": "2026-08-04",
+  "address_title": "Export Client LLC - Billing",
+  "address_parts": {
+    "street": "Prince Sultan Street",
+    "building_number": "1234",
+    "district": "Al Hamra",
+    "city": "Jeddah",
+    "postal_code": "23324",
+    "country": "Saudi Arabia"
+  },
+  "items": [
+    {
+      "item_code": "SVC-LOCAL",
+      "qty": 1,
+      "rate": 1000,
+      "uom": "Nos",
+      "item_tax_template": "KSA VAT 15% - EK"
+    },
+    {
+      "item_code": "SVC-EXPORT",
+      "qty": 1,
+      "rate": 1000,
+      "uom": "Nos",
+      "item_tax_template": "KSA Zero Rated - EK"
+    }
+  ],
+  "taxes": [
+    {
+      "account_head": "VAT 15% - EK",
+      "charge_type": "On Net Total",
+      "rate": 15,
+      "description": "VAT"
+    }
+  ]
+}

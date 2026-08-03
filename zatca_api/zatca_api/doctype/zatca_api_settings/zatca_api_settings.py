@@ -2,13 +2,15 @@
 # Copyright (c) 2026, Enfono Technologies and contributors
 # For license information, please see license.txt
 
+import datetime
 import ipaddress
+import json
 import re
 
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import cint
+from frappe.utils import cint, cstr
 
 # Address fields the free-text parser is allowed to write. Anything else in the
 # pattern list is a typo and is rejected on save rather than silently ignored.
@@ -156,6 +158,81 @@ class ZATCAAPISettings(Document):
                     _('Source {0} has SSL verification disabled.').format(frappe.bold(row.source_name)),
                     indicator='red',
                     title=_('Insecure Source'),
+                )
+
+            self._validate_source_request_shaping(row)
+
+    def _validate_source_request_shaping(self, row):
+        """Validate the request-shaping, incremental and pagination configuration.
+
+        Everything is checked on save so a misconfigured source fails in front of the
+        person editing it, not silently at 03:00 in a scheduled job.
+        """
+        for lineno, line in enumerate(cstr(row.custom_headers).splitlines(), start=1):
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if ':' not in line:
+                frappe.throw(
+                    _('Source {0}, Extra Headers line {1}: expected "Name: value".').format(
+                        row.source_name, lineno
+                    )
+                )
+
+        for lineno, line in enumerate(cstr(row.query_params).splitlines(), start=1):
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if '=' not in line:
+                frappe.throw(
+                    _('Source {0}, Query Parameters line {1}: expected "key=value".').format(
+                        row.source_name, lineno
+                    )
+                )
+
+        body = cstr(row.request_body).strip()
+        if body:
+            try:
+                json.loads(body)
+            except (ValueError, TypeError) as exc:
+                frappe.throw(
+                    _('Source {0}: Request Body is not valid JSON - {1}').format(row.source_name, str(exc))
+                )
+
+        if row.incremental_mode == 'Date Window':
+            if not row.from_param:
+                frappe.throw(_('Source {0}: a date window needs a From Parameter.').format(row.source_name))
+            date_format = cstr(row.date_format).strip() or '%Y-%m-%d'
+            try:
+                # Round-trip a known datetime to prove the format is usable.
+                datetime.datetime(2026, 1, 2, 3, 4, 5).strftime(date_format)
+            except (ValueError, TypeError) as exc:
+                frappe.throw(
+                    _('Source {0}: Date Format is not a valid strftime format - {1}').format(
+                        row.source_name, str(exc)
+                    )
+                )
+            if cint(row.lookback_days) < 0:
+                row.lookback_days = 0
+
+        if row.pagination_mode and row.pagination_mode != 'None':
+            if cint(row.page_size) <= 0:
+                row.page_size = 100
+            if cint(row.max_pages) <= 0:
+                row.max_pages = 20
+
+            if row.pagination_mode == 'Cursor' and not row.next_cursor_key:
+                frappe.throw(
+                    _(
+                        'Source {0}: cursor pagination needs a Next Cursor Key, otherwise there is '
+                        'no way to know when to stop.'
+                    ).format(row.source_name)
+                )
+            if row.pagination_mode in ('Page Number', 'Offset') and not row.page_param:
+                frappe.throw(
+                    _('Source {0}: {1} pagination needs a Page / Offset Parameter.').format(
+                        row.source_name, row.pagination_mode
+                    )
                 )
 
     def validate_shared_secret(self):

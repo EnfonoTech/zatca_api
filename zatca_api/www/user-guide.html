@@ -116,6 +116,7 @@
   <a href="#what">What it does</a>
   <a href="#auth">Authentication</a>
   <a href="#quick">Quick start</a>
+  <a href="#dryrun">Dry run (test first)</a>
   <div class="grp">Reference</div>
   <a href="#envelope">Response envelope</a>
   <a href="#zatca">The zatca block</a>
@@ -242,6 +243,50 @@ migrated, and which ZATCA phase each company resolves to.</p>
 </div>
 </section>
 
+<section id="dryrun">
+<h2>Dry run — test before you write anything</h2>
+<p>Give this endpoint to whoever is building the feed. <strong>Nothing is written to
+the database</strong>, so they can run it against the live site as often as they like
+while iterating.</p>
+<pre><code>POST /api/method/zatca_api.api.v1.validate_payload</code></pre>
+<p>Send exactly the invoice JSON you intend to send for real. Add
+<code>?document_type=Credit Note</code> for a return.</p>
+<div class="scroll"><table>
+<thead><tr><th>Response key</th><th>What it tells you</th></tr></thead>
+<tbody>
+<tr><td><code>valid</code></td>
+    <td>The verdict. A 200 only means the check <em>ran</em> — always read this.</td></tr>
+<tr><td><code>errors[]</code></td><td>Every problem, each naming the exact field.</td></tr>
+<tr><td><code>warnings[]</code></td><td>Non-fatal; usually an incomplete buyer address.</td></tr>
+<tr><td><code>totals</code></td>
+    <td>The <strong>real</strong> ERPNext totals. Compare against your own figure — a
+        mismatch means a tax or discount misunderstanding.</td></tr>
+<tr><td><code>would_create</code></td>
+    <td>Which Customer / Items / UOMs would be new. A large unexpected
+        <code>new_items</code> means unstable item codes.</td></tr>
+<tr><td><code>zatca.invoice_type</code></td>
+    <td><code>Standard</code> or <code>Simplified</code>, plus the reason.</td></tr>
+<tr><td><code>zatca_readiness.blocking</code></td>
+    <td>The things ZATCA <em>will</em> reject. Must be empty.</td></tr>
+</tbody></table></div>
+<div class="note">
+<p><strong>How it writes nothing yet gives real totals.</strong> The payload runs
+through the same code path as a real request, inside a database savepoint that is
+always rolled back — on every path, including an unexpected error. So the totals come
+from ERPNext's own calculation and the errors from ERPNext's and
+<code>ksa_compliance</code>'s own validation, not from a parallel reimplementation
+that could drift and pass payloads which later fail. The invoice is inserted as a
+draft only, never submitted, so no ledger entry is written and nothing is filed with
+ZATCA.</p>
+</div>
+<div class="warn">
+<p>Building the feed on the other side? Send them <code>docs/DATA_CONTRACT.md</code>
+rather than this page — it is written for them, with the ZATCA rule behind each field
+and a sign-off checklist. A JSON Schema and worked sample payloads ship alongside it
+in <code>docs/schema/</code> and <code>docs/samples/</code>.</p>
+</div>
+</section>
+
 <section id="envelope">
 <h2>Response envelope</h2>
 <p>Frappe wraps every whitelisted return value in <code>message</code>, so the
@@ -340,6 +385,8 @@ company has no ZATCA settings, or <code>ksa_compliance</code> is not installed.
 <div class="scroll"><table>
 <thead><tr><th>Method</th><th>Endpoint</th><th>Purpose</th></tr></thead>
 <tbody>
+<tr><td><span class="badge b-post">POST</span></td><td><code>validate_payload</code></td>
+    <td><strong>Dry run</strong> — validate and report, writing nothing</td></tr>
 <tr><td><span class="badge b-post">POST</span></td><td><code>create_invoice</code></td>
     <td>Create (and submit) an invoice, return the QR</td></tr>
 <tr><td><span class="badge b-post">POST</span></td><td><code>create_credit_note</code></td>
