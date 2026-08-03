@@ -1,0 +1,406 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-04 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "column_break_top",
+  "default_company",
+  "tab_invoice",
+  "section_submission",
+  "auto_submit_invoices",
+  "submit_mode",
+  "column_break_submission",
+  "update_existing_drafts",
+  "allow_amend_submitted",
+  "section_masters",
+  "create_missing_customers",
+  "create_missing_items",
+  "create_missing_uoms",
+  "create_missing_projects",
+  "column_break_masters",
+  "default_customer_type",
+  "default_customer_group",
+  "default_territory",
+  "default_item_group",
+  "default_uom",
+  "section_address",
+  "default_country",
+  "parse_address_display",
+  "column_break_address",
+  "address_display_patterns",
+  "tab_zatca",
+  "section_zatca",
+  "zatca_phase",
+  "include_qr_png",
+  "column_break_zatca",
+  "include_signed_xml",
+  "wait_for_zatca_seconds",
+  "tab_security",
+  "section_security",
+  "require_shared_secret",
+  "shared_secret_header",
+  "column_break_security",
+  "shared_secret",
+  "allowed_ip_list",
+  "tab_pull",
+  "section_pull",
+  "pull_enabled",
+  "sources",
+  "tab_mapping",
+  "section_mapping",
+  "field_mappings",
+  "tab_logging",
+  "section_logging",
+  "log_requests",
+  "log_payloads",
+  "column_break_logging",
+  "log_retention_days"
+ ],
+ "fields": [
+  {
+   "default": "1",
+   "description": "Master switch. When off, every endpoint returns HTTP 503 and the pull scheduler is skipped.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "column_break_top",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Used when the inbound payload does not name a company. Leave blank to force callers to be explicit.",
+   "fieldname": "default_company",
+   "fieldtype": "Link",
+   "label": "Default Company",
+   "options": "Company"
+  },
+  {
+   "fieldname": "tab_invoice",
+   "fieldtype": "Tab Break",
+   "label": "Invoice Handling"
+  },
+  {
+   "fieldname": "section_submission",
+   "fieldtype": "Section Break",
+   "label": "Submission"
+  },
+  {
+   "default": "1",
+   "description": "Submit the Sales Invoice after creating it. <b>A ZATCA QR only exists for submitted invoices</b> — leaving invoices in Draft means no QR is returned.",
+   "fieldname": "auto_submit_invoices",
+   "fieldtype": "Check",
+   "label": "Auto Submit Invoices"
+  },
+  {
+   "default": "Immediate",
+   "description": "<b>Immediate</b> submits inside the request so the QR is in the response. <b>Queued</b> returns the draft immediately and submits in a background job (poll <code>get_status</code> for the QR).",
+   "fieldname": "submit_mode",
+   "fieldtype": "Select",
+   "label": "Submit Mode",
+   "options": "Immediate\nQueued"
+  },
+  {
+   "fieldname": "column_break_submission",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "When an external ID maps to an existing <b>Draft</b> invoice, overwrite it. Submitted invoices are never modified.",
+   "fieldname": "update_existing_drafts",
+   "fieldtype": "Check",
+   "label": "Update Existing Drafts"
+  },
+  {
+   "default": "0",
+   "description": "Off by default and should stay off. Submitted invoices carry GL entries and, once reported to ZATCA, are legally immutable.",
+   "fieldname": "allow_amend_submitted",
+   "fieldtype": "Check",
+   "label": "Allow Modifying Submitted Invoices"
+  },
+  {
+   "fieldname": "section_masters",
+   "fieldtype": "Section Break",
+   "label": "Master Data Auto-Creation"
+  },
+  {
+   "default": "1",
+   "fieldname": "create_missing_customers",
+   "fieldtype": "Check",
+   "label": "Create Missing Customers"
+  },
+  {
+   "default": "1",
+   "fieldname": "create_missing_items",
+   "fieldtype": "Check",
+   "label": "Create Missing Items"
+  },
+  {
+   "default": "0",
+   "description": "Off by default: a typo in an inbound UOM otherwise silently pollutes the UOM master.",
+   "fieldname": "create_missing_uoms",
+   "fieldtype": "Check",
+   "label": "Create Missing UOMs"
+  },
+  {
+   "default": "0",
+   "fieldname": "create_missing_projects",
+   "fieldtype": "Check",
+   "label": "Create Missing Projects"
+  },
+  {
+   "fieldname": "column_break_masters",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Company",
+   "fieldname": "default_customer_type",
+   "fieldtype": "Select",
+   "label": "Default Customer Type",
+   "options": "Company\nIndividual\nPartnership\nGovernment"
+  },
+  {
+   "fieldname": "default_customer_group",
+   "fieldtype": "Link",
+   "label": "Default Customer Group",
+   "options": "Customer Group"
+  },
+  {
+   "fieldname": "default_territory",
+   "fieldtype": "Link",
+   "label": "Default Territory",
+   "options": "Territory"
+  },
+  {
+   "fieldname": "default_item_group",
+   "fieldtype": "Link",
+   "label": "Default Item Group",
+   "options": "Item Group"
+  },
+  {
+   "fieldname": "default_uom",
+   "fieldtype": "Link",
+   "label": "Default UOM",
+   "options": "UOM"
+  },
+  {
+   "fieldname": "section_address",
+   "fieldtype": "Section Break",
+   "label": "Buyer Address"
+  },
+  {
+   "description": "Fallback country for addresses created from payloads that omit one. Required for the ZATCA buyer country code.",
+   "fieldname": "default_country",
+   "fieldtype": "Link",
+   "label": "Default Country",
+   "options": "Country"
+  },
+  {
+   "default": "0",
+   "description": "Extract structured address parts (street, building number, district, city, postal code) out of a single free-text address string. ZATCA Phase 2 <b>standard</b> invoices reject blank buyer address parts, so enable this when the source system only sends one address line.",
+   "fieldname": "parse_address_display",
+   "fieldtype": "Check",
+   "label": "Parse Free-Text Address"
+  },
+  {
+   "fieldname": "column_break_address",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "parse_address_display",
+   "description": "One <code>field=regex</code> per line. The first capture group is used. Supported fields: <code>address_line1</code>, <code>address_line2</code>, <code>custom_building_number</code>, <code>custom_area</code>, <code>city</code>, <code>pincode</code>, <code>state</code>. Leave blank to use the built-in KSA defaults.",
+   "fieldname": "address_display_patterns",
+   "fieldtype": "Small Text",
+   "label": "Address Parse Patterns"
+  },
+  {
+   "fieldname": "tab_zatca",
+   "fieldtype": "Tab Break",
+   "label": "ZATCA"
+  },
+  {
+   "fieldname": "section_zatca",
+   "fieldtype": "Section Break",
+   "label": "QR Response"
+  },
+  {
+   "default": "Auto",
+   "description": "<b>Auto</b> returns Phase 2 data when ZATCA Business Settings exist for the company, otherwise falls back to Phase 1. All cryptography is performed by the <code>ksa_compliance</code> app — this app never signs or hashes anything itself.",
+   "fieldname": "zatca_phase",
+   "fieldtype": "Select",
+   "label": "Phase Resolution",
+   "options": "Auto\nPhase 2 Only\nPhase 1 Only\nDisabled"
+  },
+  {
+   "default": "1",
+   "description": "Render the QR payload to a PNG and include it as base64 plus a <code>data:</code> URI. Turn off to keep responses small when the caller renders the QR itself.",
+   "fieldname": "include_qr_png",
+   "fieldtype": "Check",
+   "label": "Include QR PNG"
+  },
+  {
+   "fieldname": "column_break_zatca",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Include the full signed UBL XML in responses. Off by default — it adds roughly 30-60 KB per invoice.",
+   "fieldname": "include_signed_xml",
+   "fieldtype": "Check",
+   "label": "Include Signed XML"
+  },
+  {
+   "default": "0",
+   "description": "Block the response until ZATCA clearance/reporting finishes, up to this many seconds (hard cap 30). <b>Keep at 0.</b> The QR, UUID and hash are computed locally and are already in the response; only <code>integration_status</code> is asynchronous. Poll <code>get_status</code> instead of holding an HTTP worker.",
+   "fieldname": "wait_for_zatca_seconds",
+   "fieldtype": "Int",
+   "label": "Wait For Clearance (seconds)"
+  },
+  {
+   "fieldname": "tab_security",
+   "fieldtype": "Tab Break",
+   "label": "Security"
+  },
+  {
+   "fieldname": "section_security",
+   "fieldtype": "Section Break",
+   "description": "Every endpoint already requires a logged-in user via Frappe token auth (<code>Authorization: token &lt;api_key&gt;:&lt;api_secret&gt;</code>) and checks Sales Invoice permissions. The controls below add defence in depth.",
+   "label": "Transport Guards"
+  },
+  {
+   "default": "0",
+   "description": "Additionally require a shared secret header on every request.",
+   "fieldname": "require_shared_secret",
+   "fieldtype": "Check",
+   "label": "Require Shared Secret Header"
+  },
+  {
+   "default": "X-ZATCA-API-Secret",
+   "depends_on": "require_shared_secret",
+   "fieldname": "shared_secret_header",
+   "fieldtype": "Data",
+   "label": "Shared Secret Header Name"
+  },
+  {
+   "fieldname": "column_break_security",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "require_shared_secret",
+   "fieldname": "shared_secret",
+   "fieldtype": "Password",
+   "label": "Shared Secret"
+  },
+  {
+   "description": "One IP or CIDR block per line. Leave blank to allow any source IP.",
+   "fieldname": "allowed_ip_list",
+   "fieldtype": "Small Text",
+   "label": "Allowed IPs / CIDRs"
+  },
+  {
+   "fieldname": "tab_pull",
+   "fieldtype": "Tab Break",
+   "label": "Pull Sources"
+  },
+  {
+   "fieldname": "section_pull",
+   "fieldtype": "Section Break",
+   "description": "Optional. Use this only when the external system cannot POST to ERPNext and must be polled instead. Push mode (<code>create_invoice</code>) is preferred because it can return the QR synchronously.",
+   "label": "Scheduled Pull"
+  },
+  {
+   "default": "0",
+   "fieldname": "pull_enabled",
+   "fieldtype": "Check",
+   "label": "Enable Scheduled Pull"
+  },
+  {
+   "fieldname": "sources",
+   "fieldtype": "Table",
+   "label": "Sources",
+   "options": "ZATCA API Source"
+  },
+  {
+   "fieldname": "tab_mapping",
+   "fieldtype": "Tab Break",
+   "label": "Field Mapping"
+  },
+  {
+   "fieldname": "section_mapping",
+   "fieldtype": "Section Break",
+   "description": "Map arbitrary keys from the inbound payload onto ERPNext fields, including custom fields. This is what keeps the app client-agnostic: no client-specific fieldname is hardcoded anywhere in the code.",
+   "label": "Custom Field Mapping"
+  },
+  {
+   "fieldname": "field_mappings",
+   "fieldtype": "Table",
+   "label": "Field Mappings",
+   "options": "ZATCA API Field Mapping"
+  },
+  {
+   "fieldname": "tab_logging",
+   "fieldtype": "Tab Break",
+   "label": "Logging"
+  },
+  {
+   "fieldname": "section_logging",
+   "fieldtype": "Section Break",
+   "label": "Request Log"
+  },
+  {
+   "default": "1",
+   "fieldname": "log_requests",
+   "fieldtype": "Check",
+   "label": "Log Requests"
+  },
+  {
+   "default": "1",
+   "description": "Store request and response bodies on the log. Disable if payloads carry data you do not want retained.",
+   "fieldname": "log_payloads",
+   "fieldtype": "Check",
+   "label": "Log Payload Bodies"
+  },
+  {
+   "fieldname": "column_break_logging",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "30",
+   "description": "Logs older than this are deleted nightly. 0 keeps them forever.",
+   "fieldname": "log_retention_days",
+   "fieldtype": "Int",
+   "label": "Log Retention (days)"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-08-04 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ZATCA API",
+ "name": "ZATCA API Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Accounts Manager"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

@@ -1,0 +1,69 @@
+[
+ {
+  "collapsible": 1,
+  "doctype": "Custom Field",
+  "dt": "Sales Invoice",
+  "fieldname": "zatca_api_section",
+  "fieldtype": "Section Break",
+  "insert_after": "against_income_account",
+  "label": "External Integration",
+  "module": "ZATCA API",
+  "name": "Sales Invoice-zatca_api_section",
+  "no_copy": 1,
+  "print_hide": 1,
+  "read_only": 1
+ },
+ {
+  "allow_on_submit": 0,
+  "description": "Unique identifier of this invoice in the upstream system. Written by the ZATCA API app and used for idempotency: a repeat request carrying the same value returns the existing invoice instead of creating a duplicate. Indexed and looked up FOR UPDATE, which also serialises concurrent requests for the same id.",
+  "doctype": "Custom Field",
+  "dt": "Sales Invoice",
+  "fieldname": "zatca_api_external_id",
+  "fieldtype": "Data",
+  "in_standard_filter": 1,
+  "insert_after": "zatca_api_section",
+  "label": "External Invoice ID",
+  "module": "ZATCA API",
+  "name": "Sales Invoice-zatca_api_external_id",
+  "no_copy": 1,
+  "print_hide": 1,
+  "read_only": 1,
+  "search_index": 1
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Sales Invoice",
+  "fieldname": "zatca_api_source",
+  "fieldtype": "Data",
+  "insert_after": "zatca_api_external_id",
+  "label": "External Source",
+  "module": "ZATCA API",
+  "name": "Sales Invoice-zatca_api_source",
+  "no_copy": 1,
+  "print_hide": 1,
+  "read_only": 1
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Sales Invoice",
+  "fieldname": "zatca_api_column_break",
+  "fieldtype": "Column Break",
+  "insert_after": "zatca_api_source",
+  "module": "ZATCA API",
+  "name": "Sales Invoice-zatca_api_column_break",
+  "print_hide": 1
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Sales Invoice",
+  "fieldname": "zatca_api_synced_on",
+  "fieldtype": "Datetime",
+  "insert_after": "zatca_api_column_break",
+  "label": "Last Synced On",
+  "module": "ZATCA API",
+  "name": "Sales Invoice-zatca_api_synced_on",
+  "no_copy": 1,
+  "print_hide": 1,
+  "read_only": 1
+ }
+]

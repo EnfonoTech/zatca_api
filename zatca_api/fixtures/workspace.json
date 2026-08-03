@@ -1,0 +1,172 @@
+[
+ {
+  "charts": [],
+  "content": "[{\"id\": \"zatcaApiHdr1\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>ZATCA API</b></span>\", \"col\": 12}}, {\"id\": \"zatcaApiPara1\", \"type\": \"paragraph\", \"data\": {\"text\": \"REST bridge for creating Sales Invoices from external systems and returning the ZATCA QR code. Start with <b>ZATCA API Settings</b>, then call <code>ping</code> to confirm readiness.\", \"col\": 12}}, {\"id\": \"zatcaApiHdr2\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Quick Access</b></span>\", \"col\": 12}}, {\"id\": \"zatcaApiSc1\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"ZATCA API Settings\", \"col\": 3}}, {\"id\": \"zatcaApiSc2\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Request Log\", \"col\": 3}}, {\"id\": \"zatcaApiSc3\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Integrated Invoices\", \"col\": 3}}, {\"id\": \"zatcaApiSc4\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"User Guide\", \"col\": 3}}, {\"id\": \"zatcaApiSpc1\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"zatcaApiCd1\", \"type\": \"card\", \"data\": {\"card_name\": \"Configuration\", \"col\": 4}}, {\"id\": \"zatcaApiCd2\", \"type\": \"card\", \"data\": {\"card_name\": \"Monitoring\", \"col\": 4}}, {\"id\": \"zatcaApiCd3\", \"type\": \"card\", \"data\": {\"card_name\": \"ZATCA Compliance\", \"col\": 4}}]",
+  "creation": "2026-08-04 00:00:00.000000",
+  "custom_blocks": [],
+  "docstatus": 0,
+  "doctype": "Workspace",
+  "for_user": "",
+  "hide_custom": 0,
+  "icon": "file",
+  "idx": 0,
+  "is_hidden": 0,
+  "label": "ZATCA API",
+  "links": [
+   {
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "Configuration",
+    "link_count": 2,
+    "onboard": 0,
+    "type": "Card Break"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "ZATCA API Settings",
+    "link_count": 0,
+    "link_to": "ZATCA API Settings",
+    "link_type": "DocType",
+    "onboard": 1,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "Sales Taxes and Charges Template",
+    "link_count": 0,
+    "link_to": "Sales Taxes and Charges Template",
+    "link_type": "DocType",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "Monitoring",
+    "link_count": 3,
+    "onboard": 0,
+    "type": "Card Break"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "ZATCA API Request Log",
+    "link_count": 0,
+    "link_to": "ZATCA API Request Log",
+    "link_type": "DocType",
+    "onboard": 1,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "Sales Invoice",
+    "link_count": 0,
+    "link_to": "Sales Invoice",
+    "link_type": "DocType",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "Error Log",
+    "link_count": 0,
+    "link_to": "Error Log",
+    "link_type": "DocType",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "ZATCA Compliance",
+    "link_count": 3,
+    "onboard": 0,
+    "type": "Card Break"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "ZATCA Business Settings",
+    "link_count": 0,
+    "link_to": "ZATCA Business Settings",
+    "link_type": "DocType",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "ZATCA Phase 1 Business Settings",
+    "link_count": 0,
+    "link_to": "ZATCA Phase 1 Business Settings",
+    "link_type": "DocType",
+    "onboard": 0,
+    "type": "Link"
+   },
+   {
+    "dependencies": "",
+    "hidden": 0,
+    "is_query_report": 0,
+    "label": "Sales Invoice Additional Fields",
+    "link_count": 0,
+    "link_to": "Sales Invoice Additional Fields",
+    "link_type": "DocType",
+    "onboard": 0,
+    "type": "Link"
+   }
+  ],
+  "modified": "2026-08-04 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "ZATCA API",
+  "name": "ZATCA API",
+  "number_cards": [],
+  "owner": "Administrator",
+  "parent_page": "",
+  "public": 1,
+  "quick_lists": [],
+  "roles": [],
+  "sequence_id": 90.0,
+  "shortcuts": [
+   {
+    "color": "Grey",
+    "doc_view": "",
+    "label": "ZATCA API Settings",
+    "link_to": "ZATCA API Settings",
+    "type": "DocType"
+   },
+   {
+    "color": "Blue",
+    "doc_view": "List",
+    "label": "Request Log",
+    "link_to": "ZATCA API Request Log",
+    "type": "DocType"
+   },
+   {
+    "color": "Green",
+    "doc_view": "List",
+    "stats_filter": "{\"docstatus\":[\"=\",1]}",
+    "label": "Integrated Invoices",
+    "link_to": "Sales Invoice",
+    "type": "DocType"
+   },
+   {
+    "color": "Orange",
+    "label": "User Guide",
+    "type": "URL",
+    "url": "/user-guide"
+   }
+  ],
+  "title": "ZATCA API"
+ }
+]

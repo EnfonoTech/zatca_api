@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZATCA API — Integration Guide</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23117a4a'/%3E%3Cg fill='%23fff'%3E%3Crect x='7' y='7' width='7' height='7' rx='1'/%3E%3Crect x='18' y='7' width='7' height='7' rx='1'/%3E%3Crect x='7' y='18' width='7' height='7' rx='1'/%3E%3Crect x='18' y='18' width='3' height='3'/%3E%3Crect x='22' y='22' width='3' height='3'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  :root{
+    --brand:#117a4a; --brand-dk:#0c5c37; --brand-lt:#e8f5ee;
+    --ink:#16241d; --muted:#5d6b64; --line:#dfe6e2; --bg:#f6f8f7; --card:#fff;
+    --code-bg:#0f1b16; --code-ink:#d8efe3; --warn-bg:#fff6e5; --warn-line:#e0a93c;
+    --danger-bg:#fdecec; --danger-line:#c94040; --info-bg:#eaf2fb; --info-line:#3d7ec4;
+    --sidebar:#0f1b16;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--brand-dk)}
+  code,pre{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  code{background:var(--brand-lt);color:var(--brand-dk);padding:.1em .35em;border-radius:4px;font-size:.88em}
+  pre{background:var(--code-bg);color:var(--code-ink);padding:16px 18px;border-radius:8px;
+    overflow-x:auto;font-size:13px;line-height:1.55}
+  pre code{background:none;color:inherit;padding:0;font-size:inherit}
+
+  .layout{display:flex;min-height:100vh}
+  nav.side{width:264px;flex:0 0 264px;background:var(--sidebar);color:#c8d6cf;
+    padding:22px 0 40px;position:sticky;top:0;height:100vh;overflow-y:auto}
+  nav.side .brand{padding:0 22px 18px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:14px}
+  nav.side .brand strong{display:block;color:#fff;font-size:16px;letter-spacing:.2px}
+  nav.side .brand span{font-size:12px;color:#8fa79b}
+  nav.side a{display:block;padding:7px 22px;color:#c8d6cf;text-decoration:none;font-size:13.5px;
+    border-left:3px solid transparent}
+  nav.side a:hover{background:rgba(255,255,255,.06);color:#fff;border-left-color:var(--brand)}
+  nav.side .grp{padding:14px 22px 5px;font-size:11px;text-transform:uppercase;
+    letter-spacing:.09em;color:#7d9488}
+
+  main{flex:1;min-width:0;padding:0 0 80px}
+  header.hero{background:linear-gradient(135deg,var(--brand) 0%,var(--brand-dk) 100%);
+    color:#fff;padding:44px 44px 38px}
+  header.hero h1{margin:0 0 8px;font-size:30px;letter-spacing:-.3px}
+  header.hero p{margin:0;max-width:70ch;color:#d6eee1;font-size:15.5px}
+  header.hero .meta{margin-top:18px;font-size:12.5px;color:#bfe0ce}
+  header.hero .meta code{background:rgba(255,255,255,.16);color:#fff}
+
+  .wrap{padding:0 44px;max-width:1000px}
+  section{margin-top:38px}
+  h2{font-size:21px;margin:0 0 6px;padding-bottom:8px;border-bottom:2px solid var(--line)}
+  h3{font-size:16.5px;margin:26px 0 6px}
+  p{margin:10px 0}
+  ul,ol{margin:10px 0;padding-left:22px}
+  li{margin:4px 0}
+
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px;background:var(--card)}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--brand-lt);color:var(--brand-dk);font-weight:600;font-size:13px}
+  tbody tr:last-child td{border-bottom:none}
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+  .note{border-left:4px solid var(--info-line);background:var(--info-bg);
+    padding:12px 16px;border-radius:0 6px 6px 0;margin:16px 0}
+  .warn{border-left:4px solid var(--warn-line);background:var(--warn-bg);
+    padding:12px 16px;border-radius:0 6px 6px 0;margin:16px 0}
+  .danger{border-left:4px solid var(--danger-line);background:var(--danger-bg);
+    padding:12px 16px;border-radius:0 6px 6px 0;margin:16px 0}
+  .note p:first-child,.warn p:first-child,.danger p:first-child{margin-top:0}
+  .note p:last-child,.warn p:last-child,.danger p:last-child{margin-bottom:0}
+
+  .badge{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11.5px;
+    font-weight:600;letter-spacing:.02em;white-space:nowrap}
+  .b-get{background:#e3f0ff;color:#1c5fa8}
+  .b-post{background:#e5f6ec;color:#0c5c37}
+  .b-ok{background:#e5f6ec;color:#0c5c37}
+  .b-no{background:#fdecec;color:#a72d2d}
+  .b-wait{background:#fff6e5;color:#8a6018}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin:16px 0}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:15px 17px}
+  .card h4{margin:0 0 5px;font-size:14px;color:var(--brand-dk)}
+  .card p{margin:0;font-size:13.5px;color:var(--muted)}
+
+  footer{margin:56px 44px 0;padding-top:18px;border-top:1px solid var(--line);
+    color:var(--muted);font-size:12.5px}
+
+  @media (max-width:900px){
+    .layout{flex-direction:column}
+    nav.side{width:100%;flex:none;height:auto;position:static;padding-bottom:18px}
+    nav.side a{display:inline-block;border-left:none;border-bottom:2px solid transparent;padding:6px 14px}
+    nav.side a:hover{border-left-color:transparent;border-bottom-color:var(--brand)}
+    nav.side .grp{padding:10px 14px 2px}
+    header.hero{padding:30px 20px}
+    header.hero h1{font-size:23px}
+    .wrap{padding:0 20px}
+    footer{margin:40px 20px 0}
+  }
+  @media print{
+    nav.side{display:none}
+    body{background:#fff}
+    header.hero{background:#fff;color:#000;border-bottom:3px solid var(--brand)}
+    header.hero p,header.hero .meta{color:#333}
+    pre{background:#f4f4f4;color:#000;border:1px solid #ccc}
+    section{page-break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="side">
+  <div class="brand">
+    <strong>ZATCA API</strong>
+    <span>Integration Guide &middot; v1.0.0</span>
+  </div>
+  <div class="grp">Getting started</div>
+  <a href="#what">What it does</a>
+  <a href="#auth">Authentication</a>
+  <a href="#quick">Quick start</a>
+  <div class="grp">Reference</div>
+  <a href="#envelope">Response envelope</a>
+  <a href="#zatca">The zatca block</a>
+  <a href="#endpoints">Endpoints</a>
+  <a href="#payload">Invoice payload</a>
+  <a href="#tax">Taxes</a>
+  <a href="#errors">Error codes</a>
+  <div class="grp">Operating</div>
+  <a href="#idem">Idempotency</a>
+  <a href="#checklist">Phase 2 checklist</a>
+  <a href="#mapping">Custom field mapping</a>
+  <a href="#pull">Pull mode</a>
+  <a href="#trouble">Troubleshooting</a>
+</nav>
+
+<main>
+<header class="hero">
+  <h1>ZATCA API — Integration Guide</h1>
+  <p>Create ERPNext Sales Invoices from any external system over REST, and get the
+     ZATCA QR code back in the same response.</p>
+  <div class="meta">
+    Base path <code>/api/method/zatca_api.api.v1.</code>
+    &nbsp;&middot;&nbsp; Frappe/ERPNext v15
+    &nbsp;&middot;&nbsp; ZATCA Phase 1 &amp; Phase 2
+  </div>
+</header>
+
+<div class="wrap">
+
+<section id="what">
+<h2>What it does</h2>
+<p>One POST creates the invoice and returns the QR:</p>
+<pre><code>POST /api/method/zatca_api.api.v1.create_invoice
+   &rarr; Customer / Address / Item / UOM resolved (idempotently)
+   &rarr; Sales Invoice created and submitted
+   &rarr; ksa_compliance signs it and files it with ZATCA
+   &rarr; response: invoice detail + uuid, invoice_hash, QR content, QR PNG</code></pre>
+
+<div class="cards">
+  <div class="card"><h4>Generic by design</h4>
+    <p>No hardcoded credentials, fieldnames or defaults. Key names are matched
+       case- and separator-insensitively, so an upstream system's own naming works
+       without configuration.</p></div>
+  <div class="card"><h4>Safe to retry</h4>
+    <p>Your <code>external_id</code> is stored on an indexed field and locked on
+       lookup. A repeat request returns the existing invoice instead of creating a
+       duplicate.</p></div>
+  <div class="card"><h4>No ZATCA crypto here</h4>
+    <p>All TLV encoding, XML generation, hashing and signing is delegated to
+       <code>ksa_compliance</code>. This app reads the result and shapes it for the
+       response.</p></div>
+  <div class="card"><h4>Ledger-safe</h4>
+    <p>A submitted invoice is never rewritten. Taxes are computed by ERPNext, so
+       mixed standard / zero-rated / exempt lines stay correct.</p></div>
+</div>
+
+<div class="note">
+<p><strong>Prerequisite for ZATCA.</strong> Install and configure
+<code>ksa_compliance</code> on the site. It is an <em>optional</em> dependency:
+without it, invoice creation over REST still works and every response reports
+<code>zatca.available = false</code>.</p>
+</div>
+</section>
+
+<section id="auth">
+<h2>Authentication</h2>
+<p>Standard Frappe token authentication. <strong>No endpoint allows anonymous
+access.</strong></p>
+<p>Generate a key pair in the desk: <strong>User</strong> &rarr; your integration
+user &rarr; <strong>Settings</strong> &rarr; <strong>API Access</strong> &rarr;
+<strong>Generate Keys</strong>. The secret is shown once.</p>
+<pre><code>Authorization: token &lt;api_key&gt;:&lt;api_secret&gt;</code></pre>
+<p>The user needs <code>create</code> and <code>submit</code> on
+<strong>Sales Invoice</strong>. The <code>Accounts Manager</code> role covers
+everything. Permissions are checked against <em>this user</em> and are never
+escalated.</p>
+
+<h3>Optional extra guards</h3>
+<p>Under <strong>ZATCA API Settings &rarr; Security</strong>:</p>
+<div class="scroll"><table>
+<thead><tr><th>Guard</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td>Require Shared Secret Header</td>
+    <td>Every request must also carry <code>X-ZATCA-API-Secret</code> (header name
+        configurable). Compared in constant time.</td></tr>
+<tr><td>Allowed IPs / CIDRs</td>
+    <td>One IP or CIDR per line; blank allows any source.
+        <code>X-Forwarded-For</code> is honoured left-most only.</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="quick">
+<h2>Quick start</h2>
+<p><strong>1. Confirm the install.</strong> Run this first whenever anything looks
+wrong &mdash; it reports whether authentication works, whether the custom fields are
+migrated, and which ZATCA phase each company resolves to.</p>
+<pre><code>curl -s -H "Authorization: token $API_KEY:$API_SECRET" \
+  "https://&lt;site&gt;/api/method/zatca_api.api.v1.ping"</code></pre>
+<p><code>custom_fields_installed</code> must be <code>true</code>. If not, run
+<code>bench --site &lt;site&gt; migrate</code>.</p>
+
+<p><strong>2. Create an invoice.</strong></p>
+<pre><code>curl -X POST "https://&lt;site&gt;/api/method/zatca_api.api.v1.create_invoice" \
+  -H "Authorization: token $API_KEY:$API_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_id": "INV-2026-0001",
+    "customer": "Al Rajhi Trading",
+    "company": "Enfono KSA",
+    "posting_date": "2026-08-04",
+    "items": [
+      { "item_code": "SVC-01", "qty": 2, "rate": 500 }
+    ]
+  }'</code></pre>
+
+<p><strong>3. Read the QR</strong> from <code>message.data.zatca</code>, and poll
+<code>get_status</code> for the ZATCA filing outcome.</p>
+
+<div class="warn">
+<p><strong>A ZATCA QR only exists for a submitted invoice.</strong> Keep
+<em>Auto Submit Invoices</em> on in ZATCA API Settings, or pass
+<code>"submit": true</code>. A draft returns
+<code>zatca.available = false</code> with a reason saying exactly that.</p>
+</div>
+</section>
+
+<section id="envelope">
+<h2>Response envelope</h2>
+<p>Frappe wraps every whitelisted return value in <code>message</code>, so the
+envelope sits one level down:</p>
+<pre><code>{
+  "message": {
+    "success": true,
+    "request_id": "a1b2c3d4e5f6",
+    "timestamp": "2026-08-04 11:30:00",
+    "data":     { ... },
+    "warnings": [],
+    "errors":   []
+  }
+}</code></pre>
+<p>The shape is <strong>identical for success and failure</strong>, so one parser
+handles both.</p>
+<ul>
+<li><code>request_id</code> &mdash; correlation id, also stored on the request log.
+    Quote it when reporting a problem.</li>
+<li><code>warnings</code> &mdash; non-fatal; the invoice <em>was</em> created. Most
+    often buyer address parts that ZATCA will reject for a standard invoice.
+    <strong>Log these.</strong></li>
+<li><code>errors[].code</code> &mdash; branch on the <strong>code</strong>, never on
+    the message text. Messages are translated.</li>
+</ul>
+</section>
+
+<section id="zatca">
+<h2>The <code>zatca</code> block</h2>
+<p><code>data.zatca</code> is <strong>always present</strong>. Check
+<code>available</code> first.</p>
+
+<h3>Phase 1 vs Phase 2</h3>
+<div class="scroll"><table>
+<thead><tr><th>Field</th><th>Phase 1</th><th>Phase 2</th></tr></thead>
+<tbody>
+<tr><td><code>phase</code></td><td>Phase 1</td><td>Phase 2</td></tr>
+<tr><td><code>qr_content</code></td>
+    <td><code>null</code> &mdash; the helper returns an image only</td>
+    <td>base64 <strong>TLV</strong> string</td></tr>
+<tr><td><code>qr_format</code></td><td><code>png-only</code></td>
+    <td><code>base64-tlv</code></td></tr>
+<tr><td><code>qr_png_base64</code>, <code>qr_png_data_uri</code></td>
+    <td><span class="badge b-ok">yes</span></td>
+    <td><span class="badge b-ok">yes</span></td></tr>
+<tr><td><code>uuid</code>, <code>invoice_hash</code>,
+        <code>previous_invoice_hash</code>, <code>invoice_counter</code></td>
+    <td><code>null</code> &mdash; there is no filing</td>
+    <td><span class="badge b-ok">yes</span></td></tr>
+<tr><td><code>integration_status</code></td><td><code>Not Applicable</code></td>
+    <td>ZATCA outcome &mdash; <strong>asynchronous</strong></td></tr>
+</tbody></table></div>
+
+<div class="note">
+<p><strong>Timing &mdash; the one thing to get right.</strong> On submit,
+<code>ksa_compliance</code> signs the invoice <em>locally</em>. So the
+<code>uuid</code>, <code>invoice_hash</code>, <code>previous_invoice_hash</code> and
+the QR are <strong>already in the create response</strong>. Only
+<code>integration_status</code> moves asynchronously, because the clearance or
+reporting call to ZATCA runs in a background job.</p>
+<p>Take the QR from the create response; poll <code>get_status</code> for the filing
+outcome. Do not hold the HTTP connection open waiting.</p>
+</div>
+
+<h3><code>integration_status</code> values</h3>
+<div class="scroll"><table>
+<thead><tr><th>Value</th><th>Flags</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>Ready For Batch</code></td><td><span class="badge b-wait">pending</span></td>
+    <td>Signed, not yet filed.</td></tr>
+<tr><td><code>Accepted</code></td><td><span class="badge b-ok">cleared</span></td>
+    <td>ZATCA accepted it.</td></tr>
+<tr><td><code>Accepted with warnings</code></td><td><span class="badge b-ok">cleared</span></td>
+    <td>Accepted; ZATCA raised warnings.</td></tr>
+<tr><td><code>Clearance switched off</code></td><td><span class="badge b-ok">cleared</span></td>
+    <td>Filing intentionally disabled.</td></tr>
+<tr><td><code>Rejected</code></td><td><span class="badge b-no">action needed</span></td>
+    <td>Refused. Fix, then <code>resubmit_to_zatca</code>.</td></tr>
+<tr><td><code>Resend</code></td><td><span class="badge b-no">action needed</span></td>
+    <td>Transient failure (timeout, 5xx, rate limit). Retry.</td></tr>
+<tr><td><code>Corrected</code></td><td>&mdash;</td>
+    <td>Superseded by a corrected filing.</td></tr>
+<tr><td><code>Duplicate</code></td><td>&mdash;</td>
+    <td>ZATCA already held this invoice.</td></tr>
+</tbody></table></div>
+
+<h3>When <code>available</code> is false</h3>
+<p><code>reason</code> says why &mdash; usually the invoice is still in Draft, the
+company has no ZATCA settings, or <code>ksa_compliance</code> is not installed.
+<strong>Creating the invoice still succeeded</strong> in every one of those cases.</p>
+</section>
+
+<section id="endpoints">
+<h2>Endpoints</h2>
+<p>Base path <code>/api/method/zatca_api.api.v1.</code></p>
+<div class="scroll"><table>
+<thead><tr><th>Method</th><th>Endpoint</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><span class="badge b-post">POST</span></td><td><code>create_invoice</code></td>
+    <td>Create (and submit) an invoice, return the QR</td></tr>
+<tr><td><span class="badge b-post">POST</span></td><td><code>create_credit_note</code></td>
+    <td>Create a return / credit note</td></tr>
+<tr><td><span class="badge b-post">POST</span></td><td><code>submit_invoice</code></td>
+    <td>Submit an existing draft</td></tr>
+<tr><td><span class="badge b-post">POST</span></td><td><code>resubmit_to_zatca</code></td>
+    <td>Retry a Rejected / Resend filing</td></tr>
+<tr><td><span class="badge b-get">GET</span></td><td><code>get_invoice</code></td>
+    <td>One invoice plus its ZATCA block</td></tr>
+<tr><td><span class="badge b-get">GET</span></td><td><code>get_status</code></td>
+    <td>Cheap clearance-status poll</td></tr>
+<tr><td><span class="badge b-get">GET</span></td><td><code>list_invoices</code></td>
+    <td>Paginated list</td></tr>
+<tr><td><span class="badge b-get">GET</span></td><td><code>ping</code></td>
+    <td>Health and capability probe</td></tr>
+<tr><td><span class="badge b-post">POST</span></td><td><code>pull_now</code></td>
+    <td>Trigger a configured pull source</td></tr>
+</tbody></table></div>
+<p>A wrong HTTP verb returns <strong>403</strong>, not 405 &mdash; that is Frappe's
+behaviour.</p>
+
+<h3>Lookups</h3>
+<p><code>get_invoice</code>, <code>get_status</code>, <code>submit_invoice</code> and
+<code>resubmit_to_zatca</code> accept either <code>external_id</code> (your
+reference) or <code>invoice</code> (the ERPNext name).</p>
+
+<h3><code>list_invoices</code> parameters</h3>
+<div class="scroll"><table>
+<thead><tr><th>Param</th><th>Default</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>limit</code></td><td>20</td>
+    <td>Hard cap <strong>200</strong>; <strong>50</strong> when
+        <code>include_qr=1</code></td></tr>
+<tr><td><code>start</code></td><td>0</td><td>Offset</td></tr>
+<tr><td><code>docstatus</code></td><td>1</td>
+    <td>0 draft, 1 submitted, 2 cancelled</td></tr>
+<tr><td><code>company</code>, <code>customer</code>,
+        <code>from_date</code>, <code>to_date</code></td><td>&mdash;</td>
+    <td>Filters</td></tr>
+<tr><td><code>integration_status</code></td><td>&mdash;</td>
+    <td>Applied <em>before</em> pagination, so <code>total</code> and
+        <code>has_more</code> stay truthful</td></tr>
+<tr><td><code>include_qr</code></td><td>0</td>
+    <td>Renders a QR per row &mdash; expensive</td></tr>
+</tbody></table></div>
+<p>Results respect the calling user's permissions, including User Permissions that
+restrict them to one company.</p>
+</section>
+
+<section id="payload">
+<h2>Invoice payload</h2>
+<p>Key names are matched <strong>case- and separator-insensitively</strong>, so
+<code>"Customer Name"</code>, <code>customer_name</code>, <code>customerName</code>
+and <code>CUSTOMER_NAME</code> all resolve. Aliases are listed in parentheses.</p>
+
+<h3>Required</h3>
+<div class="scroll"><table>
+<thead><tr><th>Field</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>external_id</code><br><small>naming_series, invoice_no,
+        invoice_number, reference, document_no, source_id</small></td>
+    <td>Your unique reference. Drives idempotency.</td></tr>
+<tr><td><code>customer</code><br><small>customer_name, customer_code, buyer</small></td>
+    <td>Created if missing and auto-creation is on.</td></tr>
+<tr><td><code>items</code><br><small>lines, invoice_items, item_list</small></td>
+    <td>At least one row.</td></tr>
+</tbody></table></div>
+
+<h3>Header &mdash; optional</h3>
+<div class="scroll"><table>
+<thead><tr><th>Field</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>company</code></td><td>Falls back to Default Company.</td></tr>
+<tr><td><code>tax_id</code><br><small>vat_number, buyer_vat</small></td>
+    <td>Buyer VAT. Also written to
+        <code>Customer.custom_vat_registration_number</code>, which is what decides
+        B2B &mdash; see the checklist.</td></tr>
+<tr><td><code>buyer_id_type</code> / <code>buyer_id_value</code></td>
+    <td>ZATCA codes: TIN, CRN, MOM, MLS, SAG, NAT, GCC, IQA, PAS, OTH. Use when the
+        buyer has no VAT number.</td></tr>
+<tr><td><code>posting_date</code>, <code>posting_time</code>, <code>due_date</code></td>
+    <td><code>posting_time</code> feeds the ZATCA QR timestamp.</td></tr>
+<tr><td><code>currency</code>, <code>conversion_rate</code></td><td></td></tr>
+<tr><td><code>taxes</code> / <code>tax_template</code></td><td>See Taxes below.</td></tr>
+<tr><td><code>address_parts</code></td><td>Structured buyer address &mdash; preferred.</td></tr>
+<tr><td><code>address_display</code>, <code>address_title</code></td>
+    <td>Free-text address, parsed when enabled in settings.</td></tr>
+<tr><td><code>project</code>, <code>po_no</code>, <code>remarks</code>,
+        <code>cost_center</code>, <code>debit_to</code>,
+        <code>selling_price_list</code>, <code>update_stock</code></td>
+    <td>Pass-through.</td></tr>
+<tr><td><code>payment_mode</code> + <code>is_pos</code>,
+        <code>payment_amount</code></td>
+    <td>Supplies the ZATCA payment means code.
+        <strong>Requires <code>is_pos: 1</code></strong> &mdash; see Taxes &amp;
+        payment means.</td></tr>
+<tr><td><code>is_return</code>, <code>return_against</code>,
+        <code>is_debit_note</code></td>
+    <td><code>return_against</code> must reference a <strong>submitted</strong>
+        invoice.</td></tr>
+<tr><td><code>submit</code></td>
+    <td>Overrides the Auto Submit setting for this one request.</td></tr>
+</tbody></table></div>
+
+<h3>Item rows</h3>
+<div class="scroll"><table>
+<thead><tr><th>Field</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>item_code</code> <small>(code, sku, item)</small></td>
+    <td><strong>Required.</strong></td></tr>
+<tr><td><code>qty</code> <small>(quantity)</small></td>
+    <td>Defaults to 1 when absent. An explicit <code>0</code> is
+        <strong>rejected</strong>, not silently changed to 1.</td></tr>
+<tr><td><code>rate</code> <small>(price, unit_price)</small></td>
+    <td>Must not be negative &mdash; use <code>is_return</code> for credit notes.</td></tr>
+<tr><td><code>uom</code> <small>(unit, unit_of_measure)</small></td>
+    <td>Conversion factor resolved automatically.</td></tr>
+<tr><td><code>item_tax_template</code></td>
+    <td><strong>Set this on mixed-rate invoices.</strong></td></tr>
+<tr><td><code>item_name</code>, <code>description</code>,
+        <code>discount_amount</code>, <code>discount_percentage</code>,
+        <code>income_account</code>, <code>cost_center</code>,
+        <code>warehouse</code>, <code>item_group</code></td><td></td></tr>
+</tbody></table></div>
+
+<h3>Buyer address parts</h3>
+<div class="scroll"><table>
+<thead><tr><th>Field</th><th>Aliases</th><th>ZATCA standard invoice</th></tr></thead>
+<tbody>
+<tr><td><code>street</code></td><td>address_line1, street_name</td><td>Required</td></tr>
+<tr><td><code>building_number</code></td><td>custom_building_number</td>
+    <td>Required, <strong>exactly 4 digits</strong></td></tr>
+<tr><td><code>district</code></td><td>custom_area, area, neighbourhood</td><td>Required</td></tr>
+<tr><td><code>city</code></td><td>town</td><td>Required</td></tr>
+<tr><td><code>postal_code</code></td><td>pincode, zip, postcode</td>
+    <td>Required, <strong>exactly 5 digits</strong></td></tr>
+<tr><td><code>additional_street</code>, <code>state</code>, <code>country</code>,
+        <code>email</code>, <code>phone</code></td><td></td><td>Optional</td></tr>
+</tbody></table></div>
+<p>Short numeric building numbers and postal codes are zero-padded automatically
+(<code>521</code> &rarr; <code>0521</code>). Over-long values are left alone so
+<code>ksa_compliance</code> reports the real problem against the Address record.</p>
+</section>
+
+<section id="tax">
+<h2>Taxes</h2>
+<p>Precedence:</p>
+<ol>
+<li><strong><code>taxes</code> array in the payload</strong> &mdash; used verbatim.
+    Each <code>account_head</code> is validated to exist <em>and belong to the
+    invoice's company</em>.</li>
+<li><strong><code>tax_template</code></strong> &mdash; a named Sales Taxes and
+    Charges Template for the company.</li>
+<li><strong>The company's default template.</strong></li>
+</ol>
+<pre><code>"taxes": [
+  { "account_head": "VAT 15% - EK", "charge_type": "On Net Total",
+    "rate": 15, "description": "VAT 15%" }
+]</code></pre>
+<p><code>charge_type</code> <code>Actual</code> takes <code>tax_amount</code>; every
+other type takes <code>rate</code>.</p>
+
+<div class="note">
+<p>In all three cases the per-row <code>item_tax_template</code> still governs which
+lines are taxed and at what rate. ERPNext fills
+<code>item_wise_tax_detail</code> &mdash; exactly the field
+<code>ksa_compliance</code> reads to build per-line VAT categories for the ZATCA
+XML. So <strong>mixed standard / zero-rated / exempt invoices come out
+correct</strong>.</p>
+</div>
+
+<h3>Payment means &mdash; requires <code>is_pos</code></h3>
+<p><code>ksa_compliance</code> resolves the ZATCA payment means code from
+<code>payments[0].mode_of_payment</code> &rarr;
+<code>Mode of Payment.custom_zatca_payment_means_code</code>.</p>
+<p>ERPNext, however, gates the <code>Sales Invoice.payments</code> table on
+<code>eval:doc.is_pos===1</code>, so on a regular invoice the row is
+<strong>silently discarded at insert</strong> and no payment means code is ever
+reported.</p>
+<div class="danger">
+<p>This app refuses rather than dropping it. Sending <code>payment_mode</code>
+without <code>is_pos</code> returns a <code>validation_error</code> naming the
+constraint. Send both when you genuinely want a POS invoice:</p>
+<pre><code>{ "payment_mode": "Cash", "is_pos": 1, "payment_amount": 230 }</code></pre>
+<p><code>is_pos: 1</code> makes it a POS invoice &mdash; ERPNext posts the paid
+amount against the mode of payment's account, so <code>payment_amount</code>
+changes the GL. Leave it off (defaults to <code>0</code>) to declare the means
+without recording a receipt.</p>
+</div>
+
+<div class="warn">
+<p>If no tax rows can be resolved and ZATCA is enabled for the company, the request
+is rejected with a specific message &mdash; <code>ksa_compliance</code> requires a
+non-empty taxes table. Set a default template for the company, or send
+<code>taxes</code> / <code>tax_template</code> on every request.</p>
+</div>
+</section>
+
+<section id="errors">
+<h2>Error codes</h2>
+<div class="scroll"><table>
+<thead><tr><th>HTTP</th><th><code>code</code></th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td>400</td><td><code>validation_error</code></td>
+    <td>Bad payload, or ERPNext / ksa_compliance validation.
+        <code>details</code> names the field.</td></tr>
+<tr><td>401</td><td><code>unauthorized</code></td><td>No authenticated session.</td></tr>
+<tr><td>403</td><td><code>forbidden</code></td>
+    <td>Missing DocType permission, bad shared secret, IP not allowed &mdash; or a
+        wrong HTTP verb.</td></tr>
+<tr><td>404</td><td><code>not_found</code></td><td>Unknown invoice / external id.</td></tr>
+<tr><td>409</td><td><code>duplicate</code></td><td>External id conflict.</td></tr>
+<tr><td>409</td><td><code>immutable_document</code></td>
+    <td>External id maps to a <strong>cancelled</strong> invoice. Send a new id.</td></tr>
+<tr><td>424</td><td><code>zatca_unavailable</code></td>
+    <td><code>ksa_compliance</code> not installed.</td></tr>
+<tr><td>502</td><td><code>upstream_error</code></td><td>Pull-mode source failed.</td></tr>
+<tr><td>503</td><td><code>app_disabled</code></td>
+    <td><em>Enabled</em> is off in settings.</td></tr>
+<tr><td>500</td><td><code>internal_error</code></td>
+    <td>Unexpected. The <code>request_id</code> matches an Error Log entry.</td></tr>
+</tbody></table></div>
+<pre><code>{
+  "message": {
+    "success": false,
+    "request_id": "9f8e7d6c5b4a",
+    "data": {},
+    "warnings": [],
+    "errors": [
+      { "code": "validation_error",
+        "message": "Missing required field(s): customer, items.",
+        "details": { "missing": ["customer", "items"] } }
+    ]
+  }
+}</code></pre>
+<p>A failed request is fully rolled back &mdash; it never leaves half-created
+Customers, Items or Addresses behind.</p>
+</section>
+
+<section id="idem">
+<h2>Idempotency</h2>
+<p>Every invoice stores your <code>external_id</code> in the indexed custom field
+<code>Sales Invoice.zatca_api_external_id</code>.</p>
+<div class="scroll"><table>
+<thead><tr><th>Existing invoice</th><th>Result</th></tr></thead>
+<tbody>
+<tr><td>none</td><td><code>action: "created"</code></td></tr>
+<tr><td>Draft, <em>Update Existing Drafts</em> on</td>
+    <td><code>action: "updated"</code> &mdash; rewritten in place</td></tr>
+<tr><td>Draft, <em>Update Existing Drafts</em> off</td>
+    <td><code>action: "duplicate"</code> &mdash; left untouched</td></tr>
+<tr><td><strong>Submitted</strong></td>
+    <td><code>action: "duplicate"</code>, <code>duplicate: true</code> &mdash;
+        <strong>never re-posted</strong></td></tr>
+<tr><td>Cancelled</td>
+    <td><code>409 immutable_document</code> &mdash; send a new id</td></tr>
+</tbody></table></div>
+<p>The lookup takes a <code>FOR UPDATE</code> lock on the indexed column, so two
+concurrent requests carrying the same id serialise instead of racing to insert two
+invoices. <strong>Retrying is always safe</strong> &mdash; a network timeout where the
+server actually committed resolves cleanly.</p>
+
+<div class="note">
+<p><strong>Why not key on the invoice name?</strong> Because it cannot work.
+<code>frappe.model.naming.set_new_name</code> executes <code>doc.name = None</code>
+for any DocType with a naming series, which Sales Invoice has. Passing a
+<code>name</code> is silently discarded and the invoice is named
+<code>ACC-SINV-YYYY-#####</code>, so an existence check against your number never
+matches &mdash; and a repeating import creates a fresh duplicate on every run.</p>
+</div>
+</section>
+
+<section id="checklist">
+<h2>ZATCA Phase 2 checklist</h2>
+<p>Work through this before going live. <code>ping</code> reports items 1&ndash;3.</p>
+<ol>
+<li><strong><code>ksa_compliance</code> installed and configured.</strong>
+    <code>ZATCA Business Settings</code> with <code>status = Active</code> and ZATCA
+    integration enabled; CSR generated, production CSID obtained,
+    <code>zatca_cli_path</code> and <code>java_home</code> set.</li>
+<li><strong>Company address complete</strong> &mdash; street, building number, city,
+    district, postal code.</li>
+<li><strong>Company VAT registration number set</strong> (15 digits, starts and ends
+    with 3).</li>
+<li><strong>A default Sales Taxes and Charges Template</strong>, or send
+    <code>taxes</code> / <code>tax_template</code> every time.</li>
+<li><strong>Buyer identification for B2B</strong> &mdash; send <code>tax_id</code>, or
+    <code>buyer_id_type</code> + <code>buyer_id_value</code>.</li>
+<li><strong>Buyer address complete for standard invoices</strong> &mdash; send
+    <code>address_parts</code>, or enable <em>Parse Free-Text Address</em> and send
+    <code>address_display</code>.</li>
+<li><strong>Auto Submit on.</strong> No submission means no QR.</li>
+<li><strong>Reconcile.</strong> Poll <code>get_status</code>, or sweep
+    <code>list_invoices?integration_status=Rejected</code> and refile with
+    <code>resubmit_to_zatca</code>.</li>
+</ol>
+
+<div class="danger">
+<p><strong>The one that bites.</strong>
+<code>ksa_compliance.is_b2b_customer()</code> reads
+<code>Customer.custom_vat_registration_number</code> and
+<code>Customer.custom_additional_ids</code> &mdash; <strong>not</strong> the core
+<code>tax_id</code> field. A customer with only <code>tax_id</code> populated is
+classified B2C, so a genuine B2B sale is <em>reported</em> as
+<strong>simplified</strong> instead of <em>cleared</em> as <strong>standard</strong>.</p>
+<p>This app writes both fields, so sending <code>tax_id</code> is enough. But if you
+create customers by any other route, set
+<code>custom_vat_registration_number</code> yourself.</p>
+</div>
+
+<h3>Free-text address parsing</h3>
+<p>When the source system only exports one address line, enable <em>Parse Free-Text
+Address</em>. The built-in patterns handle ERPNext's own KSA layout:</p>
+<pre><code>Building No 4521, Olaya Street, Al Murabba Dist, P.C: 12613, Riyadh, Kingdom of Saudi Arabia
+  &rarr; street = Olaya Street        building_number = 4521
+    district = Al Murabba Dist     postal_code = 12613     city = Riyadh</code></pre>
+<p>Variants are handled: <code>Building No.</code> with a dot, <code>P.C</code>
+without a colon, <code>District</code> spelled out, and
+KSA / Saudi Arabia / Kingdom of Saudi Arabia.</p>
+<p>Override them in <strong>Address Parse Patterns</strong>, one
+<code>field=regex</code> per line &mdash; the first capture group supplies the
+value:</p>
+<pre><code>address_line1=Street:\s*([^,]+)
+custom_building_number=Bldg\s*#?\s*(\d+)
+pincode=ZIP\s*(\d{5})
+custom_area=Area:\s*([^,]+)
+city=City:\s*([^,]+)</code></pre>
+<p>Patterns are compiled when you save, so a bad regex is rejected then rather than
+breaking an invoice later. Explicit <code>address_parts</code> values always win over
+parsed ones.</p>
+<p>Missing parts come back as warnings <em>before</em> ZATCA rejects the invoice:</p>
+<pre><code>"warnings": [
+  "Buyer address has no building number (custom_building_number).",
+  "Buyer postal code \"123\" is 3 characters; ZATCA requires exactly 5."
+]</code></pre>
+</section>
+
+<section id="mapping">
+<h2>Custom field mapping</h2>
+<p>Nothing client-specific is hardcoded. To land an arbitrary payload key on any
+ERPNext field &mdash; including a custom field &mdash; add a row under
+<strong>ZATCA API Settings &rarr; Field Mapping</strong>:</p>
+<div class="scroll"><table>
+<thead><tr><th>Target DocType</th><th>Source Key</th><th>Target Field</th>
+    <th>Value Type</th></tr></thead>
+<tbody>
+<tr><td>Sales Invoice</td><td><code>MEASUREMENTDATE</code></td>
+    <td><code>custom_measurement_date</code></td><td>Date</td></tr>
+<tr><td>Sales Invoice</td><td><code>ANNEXUREREFID</code></td>
+    <td><code>custom_annexure_ref_id</code></td><td>Data</td></tr>
+<tr><td>Sales Invoice Item</td><td><code>LINE_REF</code></td>
+    <td><code>custom_line_ref</code></td><td>Data</td></tr>
+<tr><td>Project</td><td><code>CONTROLVALUEINSAR</code></td>
+    <td><code>custom_control_value</code></td><td>Currency</td></tr>
+</tbody></table></div>
+<ul>
+<li><strong>Source Key</strong> uses the same case/separator-insensitive matching;
+    dotted paths reach into nested objects.</li>
+<li><strong>Target Field</strong> is validated against the DocType meta
+    <em>when you save</em>, so a typo is an error you see immediately rather than a
+    value silently dropped.</li>
+<li><strong>Value Type</strong> coercion uses <code>cint</code>/<code>flt</code>/
+    <code>getdate</code>, which absorb <code>null</code>, <code>""</code> and
+    locale-formatted numbers like <code>"1,250.00"</code>.</li>
+<li><strong>Mandatory</strong> rejects the whole request when the key is absent.</li>
+</ul>
+<p>Supported targets: Sales Invoice, Sales Invoice Item, Customer, Item, Address,
+Project.</p>
+</section>
+
+<section id="pull">
+<h2>Pull mode (optional)</h2>
+<p>Use this only when the external system <strong>cannot</strong> POST into ERPNext.
+Push mode is preferred because it returns the QR synchronously.</p>
+<p>Configure one row per upstream endpoint under
+<strong>ZATCA API Settings &rarr; Pull Sources</strong>, then tick
+<strong>Enable Scheduled Pull</strong>. A cron runs every 15 minutes and is a cheap
+no-op while disabled. Trigger one immediately with <code>pull_now</code>.</p>
+<div class="scroll"><table>
+<thead><tr><th>Field</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>Endpoint URL</td><td>Must be http:// or https://.</td></tr>
+<tr><td>Auth Type</td><td>None, Header Key, Bearer Token, Basic.</td></tr>
+<tr><td>Secret / API Key</td>
+    <td><strong>Encrypted at rest.</strong> Never echoed by any response, never in a
+        git diff.</td></tr>
+<tr><td>Payload Root Key</td>
+    <td>Key holding the invoice array, e.g. <code>payloads</code>. Dotted paths
+        work; blank means the body <em>is</em> the array.</td></tr>
+<tr><td>Status Key / Status OK Value</td>
+    <td>Optional envelope assertion before processing.</td></tr>
+<tr><td>External ID Key</td><td>Which key identifies the source document.</td></tr>
+<tr><td>Timeout</td><td>Seconds; defaults to 30. Never unlimited.</td></tr>
+<tr><td>Auto Submit</td><td>Submit pulled invoices. Required for a QR.</td></tr>
+</tbody></table></div>
+<p>Each invoice is committed in <strong>its own transaction</strong>, so a failure on
+invoice 40 leaves the first 39 durably imported and rolls back only the failed one.
+Dedup is by external id, so re-polling the same feed duplicates nothing.</p>
+</section>
+
+<section id="trouble">
+<h2>Troubleshooting</h2>
+<div class="scroll"><table>
+<thead><tr><th>Symptom</th><th>Cause and fix</th></tr></thead>
+<tbody>
+<tr><td><code>403</code> on every call</td>
+    <td>Bad or missing <code>Authorization</code> header; wrong format (must be
+        <code>token key:secret</code>); user lacks Sales Invoice permission; shared
+        secret required but not sent. Also returned for a wrong HTTP verb.</td></tr>
+<tr><td><code>zatca.available = false</code>, reason mentions Draft</td>
+    <td><em>Auto Submit</em> is off, or you sent
+        <code>"submit": false</code>.</td></tr>
+<tr><td><code>zatca.available = false</code>, reason mentions settings</td>
+    <td>No active <code>ZATCA Business Settings</code> or
+        <code>ZATCA Phase 1 Business Settings</code> for the company.</td></tr>
+<tr><td><code>integration_status</code> stuck at <code>Ready For Batch</code></td>
+    <td>The background job has not run. Check the worker and scheduler are up, and
+        <code>sync_with_zatca</code> on the business settings.</td></tr>
+<tr><td><code>custom_fields_installed = false</code></td>
+    <td>Run <code>bench --site &lt;site&gt; migrate</code>.</td></tr>
+<tr><td>Invoice filed as <em>simplified</em> instead of <em>standard</em></td>
+    <td>Buyer not recognised as B2B. Send <code>tax_id</code> or
+        <code>buyer_id_type</code>/<code>buyer_id_value</code>.</td></tr>
+<tr><td>&ldquo;Please include tax rate in Sales Taxes and Charges Table&rdquo;</td>
+    <td>No tax rows resolved. Set a default template or send
+        <code>taxes</code>/<code>tax_template</code>.</td></tr>
+<tr><td>Duplicate invoices appearing</td>
+    <td>You are not sending a stable <code>external_id</code> for the same source
+        document.</td></tr>
+<tr><td>Response too large</td>
+    <td>Turn off <em>Include QR PNG</em> and/or <em>Include Signed XML</em>; drop
+        <code>include_qr</code> from <code>list_invoices</code>.</td></tr>
+<tr><td>Where do I see what happened?</td>
+    <td><strong>ZATCA API Request Log</strong> (endpoint, status, HTTP code,
+        duration, payloads, ZATCA phase / UUID / status) and
+        <strong>Error Log</strong> for tracebacks. Match on
+        <code>request_id</code>.</td></tr>
+</tbody></table></div>
+</section>
+
+<footer>
+  ZATCA API v1.0.0 &middot; Enfono Technologies &middot; MIT licence.
+  A Postman collection and environment ship in the repository under
+  <code>postman/</code>. Full markdown reference at <code>docs/USER_GUIDE.md</code>.
+</footer>
+
+</div>
+</main>
+</div>
+</body>
+</html>

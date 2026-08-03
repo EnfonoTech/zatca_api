@@ -1,0 +1,78 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-04 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "target_doctype",
+  "source_key",
+  "column_break_map",
+  "target_field",
+  "value_type",
+  "is_mandatory"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "target_doctype",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Target DocType",
+   "options": "Sales Invoice\nSales Invoice Item\nCustomer\nItem\nAddress\nProject",
+   "reqd": 1
+  },
+  {
+   "columns": 3,
+   "description": "Key in the inbound JSON payload, e.g. <code>MEASUREMENTDATE</code>. Dotted paths are supported: <code>meta.branch</code>.",
+   "fieldname": "source_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Source Key",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_map",
+   "fieldtype": "Column Break"
+  },
+  {
+   "columns": 3,
+   "description": "ERPNext fieldname to write, e.g. <code>custom_measurement_date</code>. Validated against the DocType meta on save.",
+   "fieldname": "target_field",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Target Field",
+   "reqd": 1
+  },
+  {
+   "columns": 1,
+   "default": "Data",
+   "fieldname": "value_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Value Type",
+   "options": "Data\nInt\nFloat\nCurrency\nDate\nDatetime\nTime\nCheck\nJSON",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "Reject the whole request when this key is missing from the payload.",
+   "fieldname": "is_mandatory",
+   "fieldtype": "Check",
+   "label": "Mandatory"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-04 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ZATCA API",
+ "name": "ZATCA API Field Mapping",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

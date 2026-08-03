@@ -1,0 +1,183 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-08-04 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "source_name",
+  "enabled",
+  "document_type",
+  "column_break_head",
+  "endpoint_url",
+  "http_method",
+  "section_auth",
+  "auth_type",
+  "auth_header_name",
+  "column_break_auth",
+  "auth_username",
+  "auth_secret",
+  "section_shape",
+  "payload_root",
+  "status_key",
+  "status_ok_value",
+  "column_break_shape",
+  "external_id_key",
+  "timeout",
+  "verify_ssl",
+  "auto_submit"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "source_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Source Name",
+   "reqd": 1
+  },
+  {
+   "columns": 1,
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "columns": 2,
+   "default": "Sales Invoice",
+   "fieldname": "document_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Document Type",
+   "options": "Sales Invoice\nCredit Note",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "columns": 4,
+   "description": "Full URL of the upstream endpoint that returns invoice payloads.",
+   "fieldname": "endpoint_url",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Endpoint URL",
+   "options": "URL",
+   "reqd": 1
+  },
+  {
+   "default": "GET",
+   "fieldname": "http_method",
+   "fieldtype": "Select",
+   "label": "HTTP Method",
+   "options": "GET\nPOST"
+  },
+  {
+   "fieldname": "section_auth",
+   "fieldtype": "Section Break",
+   "label": "Authentication"
+  },
+  {
+   "default": "None",
+   "fieldname": "auth_type",
+   "fieldtype": "Select",
+   "label": "Auth Type",
+   "options": "None\nHeader Key\nBearer Token\nBasic"
+  },
+  {
+   "default": "x-api-key",
+   "depends_on": "eval:doc.auth_type=='Header Key'",
+   "fieldname": "auth_header_name",
+   "fieldtype": "Data",
+   "label": "Auth Header Name"
+  },
+  {
+   "fieldname": "column_break_auth",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.auth_type=='Basic'",
+   "fieldname": "auth_username",
+   "fieldtype": "Data",
+   "label": "Username"
+  },
+  {
+   "depends_on": "eval:doc.auth_type!='None'",
+   "description": "Encrypted at rest. Never echoed back by any API response.",
+   "fieldname": "auth_secret",
+   "fieldtype": "Password",
+   "label": "Secret / API Key"
+  },
+  {
+   "fieldname": "section_shape",
+   "fieldtype": "Section Break",
+   "label": "Response Shape"
+  },
+  {
+   "default": "payloads",
+   "description": "Key holding the array of invoices. Dotted paths supported. Leave blank when the response body is itself an array.",
+   "fieldname": "payload_root",
+   "fieldtype": "Data",
+   "label": "Payload Root Key"
+  },
+  {
+   "default": "status",
+   "description": "Optional envelope status key to assert before processing.",
+   "fieldname": "status_key",
+   "fieldtype": "Data",
+   "label": "Status Key"
+  },
+  {
+   "default": "success",
+   "fieldname": "status_ok_value",
+   "fieldtype": "Data",
+   "label": "Status OK Value"
+  },
+  {
+   "fieldname": "column_break_shape",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Key in each payload item that uniquely identifies the source document. Used for idempotency.",
+   "fieldname": "external_id_key",
+   "fieldtype": "Data",
+   "label": "External ID Key"
+  },
+  {
+   "default": "30",
+   "description": "Seconds. A request without a timeout can hang a worker forever.",
+   "fieldname": "timeout",
+   "fieldtype": "Int",
+   "label": "Timeout (seconds)"
+  },
+  {
+   "default": "1",
+   "fieldname": "verify_ssl",
+   "fieldtype": "Check",
+   "label": "Verify SSL"
+  },
+  {
+   "default": "1",
+   "description": "Submit invoices pulled from this source. Required for a ZATCA QR to exist.",
+   "fieldname": "auto_submit",
+   "fieldtype": "Check",
+   "label": "Auto Submit"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-04 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ZATCA API",
+ "name": "ZATCA API Source",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

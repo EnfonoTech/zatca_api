@@ -1,0 +1,39 @@
+[project]
+name = "zatca_api"
+authors = [
+    { name = "Enfono Technologies", email = "info@enfono.com" },
+]
+description = "Generic REST bridge that creates ERPNext Sales Invoices from any external system and returns the ZATCA QR code (Phase 1 and Phase 2) in the response."
+requires-python = ">=3.10"
+readme = "README.md"
+dynamic = ["version"]
+dependencies = [
+    # "frappe~=15.0.0"   # installed and managed by bench
+    # "erpnext~=15.0.0"  # installed and managed by bench
+    # ZATCA Phase 1 / Phase 2 cryptography is delegated to `ksa_compliance`.
+    # It is an OPTIONAL runtime dependency: without it this app still creates
+    # invoices, it just reports zatca.available = false. See services/zatca.py.
+]
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.bench.dev-dependencies]
+# package_name = "~=1.1.0"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "UP", "B", "RUF"]
+ignore = [
+    "E501",   # line length handled by formatter
+    "B904",   # frappe.throw does not chain
+    "RUF001", # ambiguous unicode (Arabic strings are intentional)
+    "UP038",  # isinstance tuple form matches frappe's own style
+]
+
+[tool.ruff.format]
+quote-style = "single"

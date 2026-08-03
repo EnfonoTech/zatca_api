@@ -1,0 +1,1021 @@
+{
+  "info": {
+    "name": "ZATCA API (ERPNext)",
+    "_postman_id": "b7f1c2d4-5e6a-4b8c-9d0e-1f2a3b4c5d6e",
+    "description": "# ZATCA API\n\nREST bridge for creating ERPNext Sales Invoices from an external system and getting the **ZATCA QR code** back in the same response.\n\n## Setup\n\n1. Open the **ZATCA API** environment and fill in `base_url`, `api_key`, `api_secret`, `company`, `customer`, `item_code`.\n2. Generate the key pair in ERPNext: **User > (your API user) > Settings > API Access > Generate Keys**. The secret is shown once.\n3. Run **01 Ping** first. It reports whether authentication works, whether the custom fields are migrated, and which ZATCA phase each company resolves to.\n4. Then run the requests in order - later ones reuse `last_invoice` and `external_id` captured by earlier ones.\n\n## Response shape\n\nFrappe wraps every whitelisted return value in `message`, so the envelope is at `message`:\n\n```json\n{\n  \"message\": {\n    \"success\": true,\n    \"request_id\": \"a1b2c3d4e5f6\",\n    \"timestamp\": \"2026-08-04 11:30:00\",\n    \"data\": { \"invoice\": { ... }, \"zatca\": { ... } },\n    \"warnings\": [],\n    \"errors\": []\n  }\n}\n```\n\nThe shape is identical for success and failure, so one parser handles both.\n\n## The zatca block\n\n`data.zatca` is **always present**. Check `available`:\n\n| Field | Phase 1 | Phase 2 |\n| --- | --- | --- |\n| `phase` | `Phase 1` | `Phase 2` |\n| `qr_content` | null (helper returns an image only) | base64 TLV string |\n| `qr_format` | `png-only` | `base64-tlv` |\n| `qr_png_base64` | yes | yes |\n| `uuid` / `invoice_hash` | null (no filing) | yes |\n| `integration_status` | `Not Applicable` | ZATCA outcome, asynchronous |\n\nWhen `available` is false, `reason` says why - most often the invoice is still in Draft, or the company has no ZATCA settings.\n\n## Timing\n\nThe UUID, invoice hash, PIH and QR are computed **locally at submission** and are in the create response immediately. Only `integration_status` moves asynchronously, because the clearance/reporting call to ZATCA runs in a background job. Poll **10 Get ZATCA status** for it.\n\n## HTTP status codes\n\n`200` ok - `400` validation_error - `401` unauthorized - `403` forbidden (also returned for a wrong HTTP verb) - `404` not_found - `409` duplicate / immutable_document - `424` zatca_unavailable - `502` upstream_error - `503` app_disabled - `500` internal_error\n",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "Authorization",
+        "type": "string"
+      },
+      {
+        "key": "value",
+        "value": "token {{api_key}}:{{api_secret}}",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Default posting_date/due_date to today and today+30 when unset.",
+          "const pad = n => String(n).padStart(2, \"0\");",
+          "const fmt = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;",
+          "if (!pm.collectionVariables.get(\"posting_date\")) {",
+          "    pm.collectionVariables.set(\"posting_date\", fmt(new Date()));",
+          "}",
+          "if (!pm.collectionVariables.get(\"due_date\")) {",
+          "    const d = new Date(); d.setDate(d.getDate() + 30);",
+          "    pm.collectionVariables.set(\"due_date\", fmt(d));",
+          "}",
+          "if (!pm.collectionVariables.get(\"external_id\")) {",
+          "    pm.collectionVariables.set(\"external_id\", \"PM-\" + Date.now());",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "external_id",
+      "value": "",
+      "description": "Auto-generated per run."
+    },
+    {
+      "key": "draft_external_id",
+      "value": ""
+    },
+    {
+      "key": "last_invoice",
+      "value": "",
+      "description": "Captured from the last create."
+    },
+    {
+      "key": "last_qr_png",
+      "value": "",
+      "description": "Base64 PNG from the last create."
+    },
+    {
+      "key": "posting_date",
+      "value": ""
+    },
+    {
+      "key": "due_date",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "01 Ping (start here)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.ping"
+        },
+        "description": "Health and capability probe. Confirms authentication works, the custom fields are migrated, whether ksa_compliance is installed, and which ZATCA phase each company resolves to. Run this first whenever an integration misbehaves."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Every endpoint returns the same envelope, inside frappe's \"message\" wrapper.",
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"envelope present\", () => pm.expect(body).to.have.property(\"message\"));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "pm.test(\"request_id echoed\", () => pm.expect(env.request_id).to.be.a(\"string\"));",
+              "",
+              "const d = env.data;",
+              "pm.test(\"app enabled\", () => pm.expect(d.enabled).to.be.true);",
+              "pm.test(\"custom fields migrated\", () => pm.expect(d.custom_fields_installed).to.be.true);",
+              "console.log(\"version:\", d.version, \"| submit_mode:\", d.submit_mode);",
+              "console.log(\"ksa_compliance installed:\", d.readiness.ksa_compliance_installed,",
+              "            \"version:\", d.readiness.ksa_compliance_version);",
+              "(d.readiness.companies || []).forEach(c => console.log(\"  \", c.company, \"->\", c.phase));",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Create invoice (minimal)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+        },
+        "description": "The smallest payload that works. Submits the invoice (per ZATCA API Settings) and returns the QR in the same response.\n\nA ZATCA QR only exists for a SUBMITTED invoice. If `zatca.available` is false, read `zatca.reason`.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{external_id}}\",\n  \"customer\": \"{{customer}}\",\n  \"company\": \"{{company}}\",\n  \"posting_date\": \"{{posting_date}}\",\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"qty\": 2,\n      \"rate\": 100\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Give every run a fresh external_id so the request creates rather than dedupes.",
+              "// Re-send the SAME id to see idempotency: you get action=\"duplicate\" back.",
+              "pm.collectionVariables.set(\"external_id\", \"PM-\" + Date.now());",
+              ""
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Every endpoint returns the same envelope, inside frappe's \"message\" wrapper.",
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"envelope present\", () => pm.expect(body).to.have.property(\"message\"));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "pm.test(\"request_id echoed\", () => pm.expect(env.request_id).to.be.a(\"string\"));",
+              "",
+              "const data = env.data;",
+              "pm.test(\"invoice returned\", () => pm.expect(data.invoice.invoice).to.be.a(\"string\"));",
+              "pm.collectionVariables.set(\"last_invoice\", data.invoice.invoice);",
+              "",
+              "// The ZATCA block is ALWAYS present. `available` tells you whether a QR exists.",
+              "pm.test(\"zatca block present\", () => pm.expect(data).to.have.property(\"zatca\"));",
+              "if (data.zatca.available) {",
+              "    pm.test(\"QR image returned\", () => pm.expect(data.zatca.qr_png_base64).to.be.a(\"string\").and.not.empty);",
+              "    console.log(\"ZATCA phase:\", data.zatca.phase);",
+              "    console.log(\"integration_status:\", data.zatca.integration_status);",
+              "    if (data.zatca.uuid) console.log(\"uuid:\", data.zatca.uuid);",
+              "    if (data.zatca.invoice_hash) console.log(\"invoice_hash:\", data.zatca.invoice_hash);",
+              "    pm.collectionVariables.set(\"last_qr_png\", data.zatca.qr_png_base64);",
+              "} else {",
+              "    console.warn(\"No ZATCA QR:\", data.zatca.reason);",
+              "}",
+              "if (env.warnings.length) console.warn(\"Warnings:\", env.warnings.join(\" | \"));",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Create invoice (full B2B + address)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+        },
+        "description": "Everything a ZATCA Phase 2 STANDARD (B2B) invoice needs.\n\nKey points:\n- `tax_id` is mirrored onto Customer.custom_vat_registration_number, which is the field ksa_compliance reads to decide standard vs simplified. Sending only a bare tax_id elsewhere would file a B2B sale as simplified.\n- `address_parts` supplies the buyer street, building number (4 digits), district, city and postal code (5 digits) that ZATCA requires. Missing parts come back in `warnings`.\n- `item_tax_template` per line keeps mixed standard/zero-rated/exempt lines correct.\n- Set {{item_tax_template}} and {{vat_account}} in the environment, or delete those keys.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{external_id}}\",\n  \"customer\": \"{{customer}}\",\n  \"company\": \"{{company}}\",\n  \"tax_id\": \"{{buyer_vat}}\",\n  \"buyer_id_type\": \"CRN\",\n  \"buyer_id_value\": \"1010101010\",\n  \"posting_date\": \"{{posting_date}}\",\n  \"posting_time\": \"11:30:00\",\n  \"due_date\": \"{{due_date}}\",\n  \"currency\": \"SAR\",\n  \"po_no\": \"PO-4471\",\n  \"remarks\": \"Created via zatca_api\",\n  \"address_title\": \"{{customer}} Billing\",\n  \"address_parts\": {\n    \"street\": \"Olaya Street\",\n    \"additional_street\": \"Al Murabba\",\n    \"building_number\": \"4521\",\n    \"district\": \"Al Murabba\",\n    \"city\": \"Riyadh\",\n    \"postal_code\": \"12613\",\n    \"country\": \"Saudi Arabia\"\n  },\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"item_name\": \"Consulting services\",\n      \"description\": \"Implementation retainer, August 2026\",\n      \"qty\": 10,\n      \"rate\": 450,\n      \"uom\": \"Nos\",\n      \"item_tax_template\": \"{{item_tax_template}}\"\n    },\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"item_name\": \"Onsite support day\",\n      \"qty\": 2,\n      \"rate\": 1200,\n      \"discount_percentage\": 10\n    }\n  ],\n  \"taxes\": [\n    {\n      \"account_head\": \"{{vat_account}}\",\n      \"charge_type\": \"On Net Total\",\n      \"rate\": 15,\n      \"description\": \"VAT 15%\"\n    }\n  ],\n  \"submit\": true\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Give every run a fresh external_id so the request creates rather than dedupes.",
+              "// Re-send the SAME id to see idempotency: you get action=\"duplicate\" back.",
+              "pm.collectionVariables.set(\"external_id\", \"PM-\" + Date.now());",
+              ""
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Every endpoint returns the same envelope, inside frappe's \"message\" wrapper.",
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"envelope present\", () => pm.expect(body).to.have.property(\"message\"));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "pm.test(\"request_id echoed\", () => pm.expect(env.request_id).to.be.a(\"string\"));",
+              "",
+              "const data = env.data;",
+              "pm.test(\"invoice returned\", () => pm.expect(data.invoice.invoice).to.be.a(\"string\"));",
+              "pm.collectionVariables.set(\"last_invoice\", data.invoice.invoice);",
+              "",
+              "// The ZATCA block is ALWAYS present. `available` tells you whether a QR exists.",
+              "pm.test(\"zatca block present\", () => pm.expect(data).to.have.property(\"zatca\"));",
+              "if (data.zatca.available) {",
+              "    pm.test(\"QR image returned\", () => pm.expect(data.zatca.qr_png_base64).to.be.a(\"string\").and.not.empty);",
+              "    console.log(\"ZATCA phase:\", data.zatca.phase);",
+              "    console.log(\"integration_status:\", data.zatca.integration_status);",
+              "    if (data.zatca.uuid) console.log(\"uuid:\", data.zatca.uuid);",
+              "    if (data.zatca.invoice_hash) console.log(\"invoice_hash:\", data.zatca.invoice_hash);",
+              "    pm.collectionVariables.set(\"last_qr_png\", data.zatca.qr_png_base64);",
+              "} else {",
+              "    console.warn(\"No ZATCA QR:\", data.zatca.reason);",
+              "}",
+              "if (env.warnings.length) console.warn(\"Warnings:\", env.warnings.join(\" | \"));",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Create invoice (legacy key names)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+        },
+        "description": "The same endpoint accepting an upstream system's own key names.\n\nKeys are matched case- and separator-insensitively, so \"Naming Series\", \"Customer Name\", \"Item_Code\" and \"Address Display\" all resolve with no configuration. Free-text address parsing must be enabled in ZATCA API Settings for `Address Display` to be broken into ZATCA parts.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"Naming Series\": \"{{external_id}}\",\n  \"Customer Name\": \"{{customer}}\",\n  \"Company Name\": \"{{company}}\",\n  \"Tax ID\": \"{{buyer_vat}}\",\n  \"Posting Date\": \"{{posting_date}}\",\n  \"Address Display\": \"Building No 4521, Olaya Street, Al Murabba Dist, P.C: 12613, Riyadh, Kingdom of Saudi Arabia\",\n  \"Items\": [\n    {\n      \"Item_Code\": \"{{item_code}}\",\n      \"Item_Name\": \"Service\",\n      \"Qty\": 1,\n      \"Rate\": 500,\n      \"Uom\": \"Nos\"\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Give every run a fresh external_id so the request creates rather than dedupes.",
+              "// Re-send the SAME id to see idempotency: you get action=\"duplicate\" back.",
+              "pm.collectionVariables.set(\"external_id\", \"PM-\" + Date.now());",
+              ""
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Every endpoint returns the same envelope, inside frappe's \"message\" wrapper.",
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"envelope present\", () => pm.expect(body).to.have.property(\"message\"));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "pm.test(\"request_id echoed\", () => pm.expect(env.request_id).to.be.a(\"string\"));",
+              "",
+              "const data = env.data;",
+              "pm.test(\"invoice returned\", () => pm.expect(data.invoice.invoice).to.be.a(\"string\"));",
+              "pm.collectionVariables.set(\"last_invoice\", data.invoice.invoice);",
+              "",
+              "// The ZATCA block is ALWAYS present. `available` tells you whether a QR exists.",
+              "pm.test(\"zatca block present\", () => pm.expect(data).to.have.property(\"zatca\"));",
+              "if (data.zatca.available) {",
+              "    pm.test(\"QR image returned\", () => pm.expect(data.zatca.qr_png_base64).to.be.a(\"string\").and.not.empty);",
+              "    console.log(\"ZATCA phase:\", data.zatca.phase);",
+              "    console.log(\"integration_status:\", data.zatca.integration_status);",
+              "    if (data.zatca.uuid) console.log(\"uuid:\", data.zatca.uuid);",
+              "    if (data.zatca.invoice_hash) console.log(\"invoice_hash:\", data.zatca.invoice_hash);",
+              "    pm.collectionVariables.set(\"last_qr_png\", data.zatca.qr_png_base64);",
+              "} else {",
+              "    console.warn(\"No ZATCA QR:\", data.zatca.reason);",
+              "}",
+              "if (env.warnings.length) console.warn(\"Warnings:\", env.warnings.join(\" | \"));",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Idempotency check (re-send same id)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+        },
+        "description": "Send the SAME external_id twice. This request deliberately does NOT regenerate {{external_id}}, so it re-sends the previous one.\n\nExpected: `action` = \"updated\" while the invoice is still Draft, or \"duplicate\" with `duplicate` = true once it is submitted. A submitted invoice is never re-posted.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{external_id}}\",\n  \"customer\": \"{{customer}}\",\n  \"company\": \"{{company}}\",\n  \"posting_date\": \"{{posting_date}}\",\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"qty\": 2,\n      \"rate\": 100\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Every endpoint returns the same envelope, inside frappe's \"message\" wrapper.",
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"envelope present\", () => pm.expect(body).to.have.property(\"message\"));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "pm.test(\"request_id echoed\", () => pm.expect(env.request_id).to.be.a(\"string\"));",
+              "",
+              "const data = env.data;",
+              "pm.test(\"recognised as a repeat\", () => pm.expect([\"updated\", \"duplicate\"]).to.include(data.action));",
+              "console.log(\"action:\", data.action, \"| duplicate:\", data.duplicate, \"| invoice:\", data.invoice.invoice);",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Create credit note",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_credit_note"
+        },
+        "description": "Creates a return (is_return = 1) against {{last_invoice}}, set by an earlier request.\n\nItem quantities are sign-normalised, so send positive or negative figures - either works. `return_against` is optional but when given must reference a SUBMITTED invoice, which is also what ZATCA expects of a credit note.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"CN-{{external_id}}\",\n  \"customer\": \"{{customer}}\",\n  \"company\": \"{{company}}\",\n  \"posting_date\": \"{{posting_date}}\",\n  \"return_against\": \"{{last_invoice}}\",\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"qty\": 1,\n      \"rate\": 100\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Every endpoint returns the same envelope, inside frappe's \"message\" wrapper.",
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"envelope present\", () => pm.expect(body).to.have.property(\"message\"));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "pm.test(\"request_id echoed\", () => pm.expect(env.request_id).to.be.a(\"string\"));",
+              "",
+              "const inv = env.data.invoice;",
+              "pm.test(\"is a return\", () => pm.expect(inv.is_return).to.eql(1));",
+              "pm.test(\"quantities are negative\", () => pm.expect(inv.items[0].qty).to.be.below(0));",
+              "console.log(\"credit note:\", inv.invoice, \"net_total:\", inv.net_total);",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Create draft only (submit=false)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+        },
+        "description": "Overrides the Auto Submit setting for this one request. The invoice stays in Draft, so no QR is produced yet - `zatca.available` will be false with a reason saying so. Submit it later with request 08.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"DRAFT-{{external_id}}\",\n  \"customer\": \"{{customer}}\",\n  \"company\": \"{{company}}\",\n  \"posting_date\": \"{{posting_date}}\",\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"qty\": 2,\n      \"rate\": 100\n    }\n  ],\n  \"submit\": false\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Every endpoint returns the same envelope, inside frappe's \"message\" wrapper.",
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"envelope present\", () => pm.expect(body).to.have.property(\"message\"));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "pm.test(\"request_id echoed\", () => pm.expect(env.request_id).to.be.a(\"string\"));",
+              "",
+              "pm.test(\"left in draft\", () => pm.expect(env.data.invoice.docstatus).to.eql(0));",
+              "pm.test(\"no QR for a draft\", () => pm.expect(env.data.zatca.available).to.be.false);",
+              "pm.collectionVariables.set(\"draft_external_id\", \"DRAFT-\" + pm.collectionVariables.get(\"external_id\"));",
+              "console.log(\"draft:\", env.data.invoice.invoice, \"|\", env.data.zatca.reason);",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 Submit the draft",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.submit_invoice"
+        },
+        "description": "Submits an existing draft and returns the QR. Use this for the Queued submit mode, or after request 07. Idempotent: submitting an already-submitted invoice succeeds.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"external_id\": \"{{draft_external_id}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Every endpoint returns the same envelope, inside frappe's \"message\" wrapper.",
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"envelope present\", () => pm.expect(body).to.have.property(\"message\"));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "pm.test(\"request_id echoed\", () => pm.expect(env.request_id).to.be.a(\"string\"));",
+              "",
+              "pm.test(\"submitted\", () => pm.expect(env.data.invoice.docstatus).to.eql(1));",
+              "console.log(\"zatca.available:\", env.data.zatca.available, \"| phase:\", env.data.zatca.phase);",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Get invoice",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.get_invoice?external_id={{external_id}}",
+          "query": [
+            {
+              "key": "external_id",
+              "value": "{{external_id}}"
+            }
+          ]
+        },
+        "description": "Fetch one invoice with its full header, item and tax detail plus the ZATCA block. Look it up by `external_id` (your reference) or by `invoice` (the ERPNext name).\n\nAdd `include_xml=1` to also receive the signed UBL XML - roughly 30-60 KB, so it is off by default."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Every endpoint returns the same envelope, inside frappe's \"message\" wrapper.",
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"envelope present\", () => pm.expect(body).to.have.property(\"message\"));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "pm.test(\"request_id echoed\", () => pm.expect(env.request_id).to.be.a(\"string\"));",
+              "",
+              "pm.test(\"invoice returned\", () => pm.expect(env.data.invoice.invoice).to.be.a(\"string\"));",
+              "console.log(\"grand_total:\", env.data.invoice.grand_total, env.data.invoice.currency);",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Get ZATCA status (poll this)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.get_status?external_id={{external_id}}",
+          "query": [
+            {
+              "key": "external_id",
+              "value": "{{external_id}}"
+            }
+          ]
+        },
+        "description": "The cheap poll. The QR, UUID and invoice hash are computed locally and are already in the create response; only `integration_status` - the outcome of the ZATCA clearance or reporting call - is asynchronous.\n\nPoll here instead of holding an HTTP connection open. Values: Ready For Batch (pending), Accepted, Accepted with warnings, Clearance switched off, Rejected, Resend, Corrected, Duplicate."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Every endpoint returns the same envelope, inside frappe's \"message\" wrapper.",
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"envelope present\", () => pm.expect(body).to.have.property(\"message\"));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "pm.test(\"request_id echoed\", () => pm.expect(env.request_id).to.be.a(\"string\"));",
+              "",
+              "const z = env.data.zatca;",
+              "console.log(\"integration_status:\", z.integration_status,",
+              "            \"| is_pending:\", z.is_pending, \"| is_cleared:\", z.is_cleared);",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 List invoices",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.list_invoices?company={{company}}&docstatus=1&limit=10&start=0&include_qr=0",
+          "query": [
+            {
+              "key": "company",
+              "value": "{{company}}"
+            },
+            {
+              "key": "docstatus",
+              "value": "1"
+            },
+            {
+              "key": "limit",
+              "value": "10"
+            },
+            {
+              "key": "start",
+              "value": "0"
+            },
+            {
+              "key": "include_qr",
+              "value": "0"
+            }
+          ]
+        },
+        "description": "Paginated list. `limit` is capped at 200. `include_qr=1` renders a QR per row and is further capped at 50 rows because rendering is expensive.\n\nFilters: company, customer, from_date, to_date, docstatus, integration_status. Filtering by integration_status happens BEFORE pagination, so `total` and `has_more` stay truthful."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Every endpoint returns the same envelope, inside frappe's \"message\" wrapper.",
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"envelope present\", () => pm.expect(body).to.have.property(\"message\"));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "pm.test(\"request_id echoed\", () => pm.expect(env.request_id).to.be.a(\"string\"));",
+              "",
+              "const d = env.data;",
+              "pm.test(\"limit respected\", () => pm.expect(d.invoices.length).to.be.at.most(d.limit));",
+              "console.log(`${d.count} of ${d.total} (has_more=${d.has_more})`);",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "12 List only ZATCA-rejected invoices",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.list_invoices?company={{company}}&docstatus=1&integration_status=Rejected&limit=50",
+          "query": [
+            {
+              "key": "company",
+              "value": "{{company}}"
+            },
+            {
+              "key": "docstatus",
+              "value": "1"
+            },
+            {
+              "key": "integration_status",
+              "value": "Rejected"
+            },
+            {
+              "key": "limit",
+              "value": "50"
+            }
+          ]
+        },
+        "description": "The reconciliation query: everything ZATCA refused, so it can be corrected and refiled with request 13."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Every endpoint returns the same envelope, inside frappe's \"message\" wrapper.",
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"envelope present\", () => pm.expect(body).to.have.property(\"message\"));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "pm.test(\"request_id echoed\", () => pm.expect(env.request_id).to.be.a(\"string\"));",
+              "",
+              "console.log(\"rejected invoices:\", env.data.count);",
+              "env.data.invoices.forEach(i => console.log(\"  \", i.name, i.customer, i.grand_total));",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "13 Resubmit to ZATCA",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.resubmit_to_zatca"
+        },
+        "description": "Retry a filing that came back Rejected or Resend.\n\nThis delegates to ksa_compliance's own fix_rejection, which creates a fresh Sales Invoice Additional Fields document. Re-signing outside that routine would break the previous-invoice-hash chain for every later invoice. An already-Accepted invoice is skipped rather than refiled.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"invoice\": \"{{last_invoice}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Every endpoint returns the same envelope, inside frappe's \"message\" wrapper.",
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"envelope present\", () => pm.expect(body).to.have.property(\"message\"));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "pm.test(\"request_id echoed\", () => pm.expect(env.request_id).to.be.a(\"string\"));",
+              "",
+              "console.log(\"queued:\", env.data.resubmission.queued, \"|\", env.data.resubmission.message);",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "14 Trigger a pull source",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.pull_now"
+        },
+        "description": "Optional pull mode: fetch invoices from an upstream endpoint configured in ZATCA API Settings > Pull Sources, instead of waiting for the 15-minute cron.\n\nOmit `source` to run every enabled source. Push mode (requests 02-04) is preferred because it can return the QR synchronously.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"source\": \"{{pull_source_name}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Every endpoint returns the same envelope, inside frappe's \"message\" wrapper.",
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "pm.test(\"envelope present\", () => pm.expect(body).to.have.property(\"message\"));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "pm.test(\"request_id echoed\", () => pm.expect(env.request_id).to.be.a(\"string\"));",
+              "",
+              "console.log(JSON.stringify(env.data, null, 2));",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "15 Error: missing required fields",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+        },
+        "description": "Shows the error envelope. Expect HTTP 400, `success` = false, and `errors[0].code` = \"validation_error\" with the missing field names in `details.missing`.\n\nBranch on `code`, never on message text - messages are translated.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"customer\": \"{{customer}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "const env = body.message;",
+              "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+              "pm.test(\"success = false\", () => pm.expect(env.success).to.be.false);",
+              "pm.test(\"validation_error code\", () => pm.expect(env.errors[0].code).to.eql(\"validation_error\"));",
+              "pm.test(\"names the missing fields\", () => pm.expect(env.errors[0].details.missing).to.be.an(\"array\"));",
+              "console.log(\"missing:\", env.errors[0].details.missing.join(\", \"));",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "16 Error: unknown invoice",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.get_invoice?external_id=DOES-NOT-EXIST-12345",
+          "query": [
+            {
+              "key": "external_id",
+              "value": "DOES-NOT-EXIST-12345"
+            }
+          ]
+        },
+        "description": "Expect HTTP 404 with `errors[0].code` = \"not_found\"."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const env = pm.response.json().message;",
+              "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+              "pm.test(\"not_found code\", () => pm.expect(env.errors[0].code).to.eql(\"not_found\"));",
+              ""
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
