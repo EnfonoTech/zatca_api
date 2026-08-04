@@ -26,6 +26,10 @@ all of those tables empty, and the failures look unrelated to each other:
 * ``LinkValidationError: Could not find Default Unit of Measure: Nos`` when creating
   an Item.
 * No Item Group / Customer Group / Territory for anything to default to.
+* ``Global Defaults.default_currency`` is still frappe's factory ``INR`` while the
+  company is ``SAR``, and no Price List exists at all, so every invoice dies with
+  ``Exchange Rate is mandatory. Maybe Currency Exchange record is not created for
+  INR to SAR.``
 
 Rather than hand-creating each master as it trips, this calls ERPNext's own
 ``setup_wizard.operations.install_fixtures.install(country)`` -- the same code the
@@ -69,6 +73,7 @@ def run(with_api_keys: int = 1):
 
     result['prerequisites'] = _ensure_erpnext_masters()
     result['company'] = _ensure_company()
+    result['currency_defaults'] = _ensure_currency_defaults()
     result['vat_account'] = _ensure_vat_account()
     result['tax_template'] = _ensure_tax_template(result['vat_account'])
     result['item_tax_templates'] = _ensure_item_tax_templates(result['vat_account'])
@@ -232,6 +237,72 @@ def _repair_company() -> None:
     if hasattr(doc, 'create_default_warehouses'):
         doc.create_default_warehouses()
         frappe.db.commit()
+
+
+def _ensure_currency_defaults() -> dict:
+    """Align the site currency with the company, and make sure a Price List exists.
+
+    A fresh site keeps frappe's factory ``Global Defaults.default_currency = INR``. With
+    a SAR company that mismatch makes ERPNext demand an INR->SAR Currency Exchange
+    record, and every invoice fails with "Exchange Rate is mandatory". The setup wizard
+    normally fixes this and also creates the Standard Selling / Standard Buying price
+    lists; a site that skipped the wizard has neither.
+    """
+    currency = frappe.db.get_value('Company', COMPANY, 'default_currency') or 'SAR'
+    country = frappe.db.get_value('Company', COMPANY, 'country') or 'Saudi Arabia'
+    changed = {}
+
+    if frappe.db.exists('Currency', currency) and not frappe.db.get_value('Currency', currency, 'enabled'):
+        frappe.db.set_value('Currency', currency, 'enabled', 1)
+        changed['currency_enabled'] = currency
+
+    defaults = frappe.get_single('Global Defaults')
+    if defaults.default_currency != currency:
+        changed['global_default_currency'] = f'{defaults.default_currency} -> {currency}'
+        defaults.default_currency = currency
+    if defaults.meta.get_field('country') and defaults.country != country:
+        defaults.country = country
+        changed['global_country'] = country
+    if changed:
+        defaults.flags.ignore_permissions = True
+        defaults.save()
+        # Global Defaults are cached in frappe.defaults; without this the running
+        # process keeps handing out the old currency.
+        frappe.clear_cache()
+
+    price_lists = {}
+    for name, selling, buying in (('Standard Selling', 1, 0), ('Standard Buying', 0, 1)):
+        if frappe.db.exists('Price List', name):
+            if frappe.db.get_value('Price List', name, 'currency') != currency:
+                frappe.db.set_value('Price List', name, 'currency', currency)
+                price_lists[name] = f'currency -> {currency}'
+            continue
+        doc = frappe.new_doc('Price List')
+        doc.price_list_name = name
+        doc.currency = currency
+        doc.selling = selling
+        doc.buying = buying
+        doc.enabled = 1
+        doc.insert(ignore_permissions=True)
+        price_lists[name] = 'created'
+
+    selling = frappe.get_single('Selling Settings')
+    if not selling.selling_price_list:
+        selling.selling_price_list = 'Standard Selling'
+        selling.flags.ignore_permissions = True
+        selling.save()
+        changed['selling_price_list'] = 'Standard Selling'
+
+    buying_meta = frappe.get_meta('Buying Settings')
+    if buying_meta.get_field('buying_price_list'):
+        buying = frappe.get_single('Buying Settings')
+        if not buying.buying_price_list:
+            buying.buying_price_list = 'Standard Buying'
+            buying.flags.ignore_permissions = True
+            buying.save()
+
+    frappe.db.commit()
+    return {'currency': currency, 'changed': changed or 'already aligned', 'price_lists': price_lists}
 
 
 def _ensure_vat_account() -> str:
