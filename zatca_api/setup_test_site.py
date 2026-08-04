@@ -26,6 +26,8 @@ all of those tables empty, and the failures look unrelated to each other:
 * ``LinkValidationError: Could not find Default Unit of Measure: Nos`` when creating
   an Item.
 * No Item Group / Customer Group / Territory for anything to default to.
+* No ``Fiscal Year`` covers today, so submitting an invoice fails with
+  ``Date ... is not in any active Fiscal Year``.
 * ``Global Defaults.default_currency`` is still frappe's factory ``INR`` while the
   company is ``SAR``, and no Price List exists at all, so every invoice dies with
   ``Exchange Rate is mandatory. Maybe Currency Exchange record is not created for
@@ -75,6 +77,7 @@ def run(with_api_keys: int = 1):
     result['company'] = _ensure_company()
     result['company_repair'] = _repair_company()
     result['currency_defaults'] = _ensure_currency_defaults()
+    result['fiscal_year'] = _ensure_fiscal_year()
     result['vat_account'] = _ensure_vat_account()
     result['tax_template'] = _ensure_tax_template(result['vat_account'])
     result['item_tax_templates'] = _ensure_item_tax_templates(result['vat_account'])
@@ -397,6 +400,57 @@ def _ensure_currency_defaults() -> dict:
 
     frappe.db.commit()
     return {'currency': currency, 'changed': changed or 'already aligned', 'price_lists': price_lists}
+
+
+def _ensure_fiscal_year() -> dict:
+    """Ensure a Fiscal Year covers today and is linked to the company.
+
+    The setup wizard creates this from the fiscal-year start date it asks for. Without
+    it, an invoice inserts fine as a draft but fails on **submit** with
+    "Date ... is not in any active Fiscal Year", because that check runs when the GL
+    entries are posted -- which is why a dry run can pass while the real call fails.
+
+    KSA uses the calendar year.
+    """
+    from frappe.utils import getdate, nowdate
+
+    today = getdate(nowdate())
+
+    candidates = frappe.get_all(
+        'Fiscal Year',
+        filters={
+            'disabled': 0,
+            'year_start_date': ['<=', today],
+            'year_end_date': ['>=', today],
+        },
+        pluck='name',
+    )
+    for candidate in candidates:
+        companies = frappe.get_all('Fiscal Year Company', filters={'parent': candidate}, pluck='company')
+        # An unrestricted Fiscal Year (no company rows) applies to every company.
+        if not companies or COMPANY in companies:
+            return {'fiscal_year': candidate, 'status': 'already covers today'}
+
+    year = str(today.year)
+    if frappe.db.exists('Fiscal Year', year):
+        doc = frappe.get_doc('Fiscal Year', year)
+        if not any(row.company == COMPANY for row in doc.companies):
+            doc.append('companies', {'company': COMPANY})
+            doc.flags.ignore_permissions = True
+            doc.save()
+            frappe.db.commit()
+            return {'fiscal_year': year, 'status': 'company linked to existing year'}
+        return {'fiscal_year': year, 'status': 'already linked'}
+
+    doc = frappe.new_doc('Fiscal Year')
+    doc.year = year
+    doc.year_start_date = f'{year}-01-01'
+    doc.year_end_date = f'{year}-12-31'
+    doc.append('companies', {'company': COMPANY})
+    doc.flags.ignore_permissions = True
+    doc.insert()
+    frappe.db.commit()
+    return {'fiscal_year': doc.name, 'status': 'created', 'range': f'{year}-01-01..{year}-12-31'}
 
 
 def _ensure_vat_account() -> str:
