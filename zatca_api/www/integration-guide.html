@@ -119,6 +119,8 @@
   <a href="#step2">2 &middot; Create invoice</a>
   <a href="#step3">3 &middot; Read response</a>
   <a href="#step4">4 &middot; Call back for status</a>
+  <div class="grp">Phase 2</div>
+  <a href="#phase2">The Phase 2 model</a>
   <div class="grp">Reference</div>
   <a href="#payload">Payload fields</a>
   <a href="#zatca">ZATCA rules</a>
@@ -523,6 +525,146 @@ The customer's invoice is valid and printable with the QR you already hold.</p>
 <pre><code>GET /api/method/zatca_api.api.v1.get_invoice?external_id=YOUR-REFERENCE</code></pre>
 <p>Same ZATCA block, plus every header, line and tax row. Add
 <code>&amp;include_xml=1</code> for the signed UBL XML on Phase 2 sites.</p>
+</section>
+
+<section id="phase2">
+<h2>The Phase 2 model</h2>
+<p>Phase 2 is the production ZATCA model. <strong>Your payload does not change at all</strong>
+&mdash; everything in this guide applies unchanged. What changes is the
+<code>zatca</code> block you get back, and the fact that ZATCA's verdict becomes
+meaningful.</p>
+
+<div class="warn">
+<p>The examples earlier on this page were captured from a <strong>Phase 1</strong> test
+site, so their <code>uuid</code>, <code>invoice_hash</code> and <code>qr_content</code>
+are <code>null</code> and <code>integration_status</code> is
+<code>Not Applicable</code>. This section documents what those same fields contain on a
+Phase 2 site. Build for both: read <code>zatca.phase</code> and branch.</p>
+</div>
+
+<h3>Phase 1 vs Phase 2, side by side</h3>
+<div class="scroll"><table>
+<thead><tr><th>Field</th><th>Phase 1</th><th>Phase 2</th></tr></thead>
+<tbody>
+<tr><td><code>phase</code></td><td><code>Phase 1</code></td><td><code>Phase 2</code></td></tr>
+<tr><td><code>qr_png_base64</code></td>
+    <td><span class="badge b-ok">yes</span></td>
+    <td><span class="badge b-ok">yes</span></td></tr>
+<tr><td><code>qr_content</code></td>
+    <td><code>null</code></td>
+    <td>base64 <strong>TLV</strong> string</td></tr>
+<tr><td><code>qr_format</code></td><td><code>png-only</code></td><td><code>base64-tlv</code></td></tr>
+<tr><td><code>uuid</code></td><td><code>null</code></td><td>ZATCA invoice UUID</td></tr>
+<tr><td><code>invoice_hash</code></td><td><code>null</code></td><td>base64 SHA-256 of the signed invoice</td></tr>
+<tr><td><code>previous_invoice_hash</code></td><td><code>null</code></td><td>links this invoice to the one before it</td></tr>
+<tr><td><code>invoice_counter</code></td><td><code>null</code></td><td>sequential counter per device</td></tr>
+<tr><td><code>integration_status</code></td>
+    <td><code>Not Applicable</code></td>
+    <td><strong>ZATCA's verdict &mdash; asynchronous</strong></td></tr>
+<tr><td><code>invoice_type_transaction</code></td><td>absent</td>
+    <td><code>0100000</code> standard / <code>0200000</code> simplified</td></tr>
+<tr><td><code>additional_fields_doc</code></td><td>absent</td><td>our internal ZATCA record, for support</td></tr>
+</tbody></table></div>
+
+<h3>The Phase 2 zatca block</h3>
+<pre><code>{
+  &quot;available&quot;: true,
+  &quot;phase&quot;: &quot;Phase 2&quot;,
+  &quot;additional_fields_doc&quot;: &quot;ACC-SINV-2026-00007-AdditionalFields-42&quot;,
+  &quot;uuid&quot;: &quot;3f2504e0-4f89-11d3-9a0c-0305e82c3301&quot;,
+  &quot;invoice_counter&quot;: 42,
+  &quot;invoice_hash&quot;: &quot;NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzk=&quot;,
+  &quot;previous_invoice_hash&quot;: &quot;MmRlYTRhNzc4NzYzYTIzNzk0MzRkZTUxNzY0YmY4ODc=&quot;,
+  &quot;qr_content&quot;: &quot;AQ5aQVRDQSBTZWxsZXICDzMxMTExMTExMTExMTExMwMU\u2026&quot;,
+  &quot;qr_format&quot;: &quot;base64-tlv&quot;,
+  &quot;qr_png_base64&quot;: &quot;iVBORw0KGgoAAAANSUhEUg\u2026  &lt;2104 chars of base64 PNG&gt;&quot;,
+  &quot;qr_png_data_uri&quot;: &quot;data:image/png;base64,iVBORw0KGgoAAAANSUhEUg\u2026&quot;,
+  &quot;integration_status&quot;: &quot;Accepted&quot;,
+  &quot;invoice_type_transaction&quot;: &quot;0100000&quot;,
+  &quot;invoice_type_code&quot;: &quot;388&quot;,
+  &quot;is_cleared&quot;: true,
+  &quot;is_pending&quot;: false
+}</code></pre>
+
+<div class="note">
+<p><strong>The timing is the important part.</strong> Signing happens on our server the
+moment the invoice is submitted &mdash; no network call to ZATCA is involved. So
+<code>uuid</code>, <code>invoice_hash</code>, <code>previous_invoice_hash</code> and the
+QR are <strong>all in the create response, immediately</strong>, exactly as on Phase 1.</p>
+<p>Only <code>integration_status</code> is asynchronous, because filing the invoice with
+ZATCA runs in a background job. That is the one field you call back for.</p>
+</div>
+
+<h3>Clearance vs reporting</h3>
+<p>ZATCA treats the two invoice types differently, and this is decided by whether you
+sent a buyer identifier:</p>
+<div class="scroll"><table>
+<thead><tr><th></th><th>Standard (B2B)</th><th>Simplified (B2C)</th></tr></thead>
+<tbody>
+<tr><td>You send</td><td><code>tax_id</code> or <code>buyer_id_*</code></td><td>neither</td></tr>
+<tr><td><code>invoice_type_transaction</code></td><td><code>0100000</code></td><td><code>0200000</code></td></tr>
+<tr><td>ZATCA process</td><td><strong>Cleared</strong> &mdash; before you issue it</td>
+    <td><strong>Reported</strong> &mdash; after the fact</td></tr>
+<tr><td>Buyer address</td><td><strong>Mandatory</strong></td><td>Not required</td></tr>
+<tr><td>Practical effect</td>
+    <td>A rejection means the invoice must not be issued as-is</td>
+    <td>A rejection is a reporting failure to correct</td></tr>
+</tbody></table></div>
+
+<h3>The status lifecycle you must handle</h3>
+<pre><code>create_invoice returns
+        |
+        v
+integration_status = "Ready For Batch"      <- signed, QR valid, not yet filed
+        |
+        |  background job files it with ZATCA
+        v
+   +----+---------------------------+
+   |                                |
+"Accepted"                      "Rejected"
+"Accepted with warnings"        "Resend"     <- transient; we retry
+"Clearance switched off"
+   |                                |
+ done                       tell us / refile</code></pre>
+
+<p>Poll <code>get_status</code> exactly as described in step 4. Use the booleans rather
+than matching strings:</p>
+<pre><code>if zatca.is_pending:      keep polling with backoff
+elif zatca.is_cleared:    done
+else:                     Rejected or Resend - alert, do not silently ignore</code></pre>
+
+<h3>If ZATCA rejects an invoice</h3>
+<p>Do <strong>not</strong> re-send it as a new invoice &mdash; that would duplicate it.
+The refile is done on our side:</p>
+<pre><code>POST /api/method/zatca_api.api.v1.resubmit_to_zatca
+{ "external_id": "YOUR-REFERENCE" }</code></pre>
+<p>That routes through <code>ksa_compliance</code>'s own retry, which keeps the
+invoice-hash chain intact. Re-signing outside it would corrupt the chain for every
+subsequent invoice, so never attempt a manual refile.</p>
+<p>An already-accepted invoice is skipped rather than filed twice.</p>
+
+<div class="danger">
+<p><strong>Rejections are usually a data problem, not a transport problem.</strong> The
+common causes are all things you control: a buyer VAT number that is not 15 digits
+starting and ending with 3, a building number that is not exactly 4 digits, a postal code
+that is not exactly 5, or a missing district. Run <code>validate_payload</code> first and
+<code>zatca_readiness.blocking</code> catches these before ZATCA ever sees them.</p>
+</div>
+
+<h3>What you must do differently for Phase 2</h3>
+<ul>
+<li><strong>Nothing for the QR.</strong> Same field, same base64 PNG, same place.</li>
+<li><strong>Store <code>uuid</code> and <code>invoice_hash</code></strong> against your
+    local record. They are ZATCA's identifiers for the invoice and you will want them in
+    any dispute.</li>
+<li><strong>Actually poll <code>get_status</code>,</strong> and act on
+    <code>Rejected</code>. On Phase 1 this step was a no-op; on Phase 2 ignoring it means
+    silently unfiled invoices.</li>
+<li><strong>Prefer <code>qr_content</code> if you render the QR yourself.</strong> It is
+    the raw TLV; do not re-encode our PNG.</li>
+<li><strong>Never send a corrected version of a cleared invoice.</strong> Issue a credit
+    note.</li>
+</ul>
 </section>
 
 <section id="payload">
