@@ -50,6 +50,18 @@ API_USER = 'zatca-api@enfono.com'
 WAREHOUSE_TYPES = ('Transit',)
 GENDERS = ('Male', 'Female', 'Other', 'Prefer not to say')
 
+# ZATCA payment means codes are UN/EDIFACT 4461 values, which the ZATCA e-invoicing
+# spec references. ksa_compliance stores them in a free-text mandatory Data field
+# (Mode of Payment.custom_zatca_payment_means_code) with no option list, so the value
+# is the integrator's responsibility -- confirm these against current ZATCA guidance
+# before relying on them for a production filing.
+PAYMENT_MODES = (
+    ('Cash', 'Cash', '10'),  # 10 = in cash
+    ('Bank Transfer', 'Bank', '30'),  # 30 = credit transfer
+    ('Bank Draft', 'Bank', '42'),  # 42 = payment to bank account
+    ('Credit Card', 'Bank', '48'),  # 48 = bank card
+)
+
 
 def run(with_api_keys: int = 1):
     """Seed everything. Returns a summary dict, also printed for `bench execute`."""
@@ -63,6 +75,7 @@ def run(with_api_keys: int = 1):
     result['items'] = _ensure_items()
     result['company_address'] = _ensure_company_address()
     result['zatca_phase_1'] = _ensure_phase_1(result['company_address'])
+    result['payment_modes'] = _ensure_payment_modes()
     result['customer_b2c'] = _ensure_b2c_customer()
     result['settings'] = _configure_settings()
 
@@ -354,6 +367,44 @@ def _ensure_phase_1(address: str):
             doc.type_of_transaction = options[-1]
     doc.insert(ignore_permissions=True)
     return doc.name
+
+
+def _ensure_payment_modes() -> dict:
+    """Create Modes of Payment carrying a ZATCA payment means code.
+
+    erpnext's own fixtures cannot create these on a ksa_compliance site: that app adds
+    ``custom_zatca_payment_means_code`` to Mode of Payment as **mandatory**, so the
+    wizard's records fail with
+    ``MandatoryError: [Mode of Payment, Bank Draft]: custom_zatca_payment_means_code``
+    and the table is left empty.
+
+    Without at least one Mode of Payment, a payload carrying ``payment_mode`` cannot be
+    accepted, so POS / simplified-invoice testing is blocked.
+    """
+    meta = frappe.get_meta('Mode of Payment')
+    has_zatca_field = bool(meta.get_field('custom_zatca_payment_means_code'))
+    created = []
+
+    for name, mode_type, code in PAYMENT_MODES:
+        if frappe.db.exists('Mode of Payment', name):
+            # Backfill the code on an existing mode that predates ksa_compliance.
+            if has_zatca_field and not frappe.db.get_value(
+                'Mode of Payment', name, 'custom_zatca_payment_means_code'
+            ):
+                frappe.db.set_value('Mode of Payment', name, 'custom_zatca_payment_means_code', code)
+                created.append(f'{name} (code backfilled)')
+            continue
+
+        doc = frappe.new_doc('Mode of Payment')
+        doc.mode_of_payment = name
+        doc.type = mode_type
+        doc.enabled = 1
+        if has_zatca_field:
+            doc.custom_zatca_payment_means_code = code
+        doc.insert(ignore_permissions=True)
+        created.append(f'{name}={code}')
+
+    return {'created': created, 'total': frappe.db.count('Mode of Payment')}
 
 
 def _ensure_b2c_customer() -> str:
