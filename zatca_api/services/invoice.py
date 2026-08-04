@@ -22,9 +22,20 @@ document, flagged ``duplicate``.
 **Taxes are computed by ERPNext, not flattened by hand.** Collapsing every Item
 Tax Template into one ``On Net Total`` row - as the previous implementation did -
 charges standard-rate VAT on zero-rated and exempt lines. Here the per-row
-``item_tax_template`` is set and ERPNext's own
-``calculate_taxes_and_totals`` fills ``item_wise_tax_detail``, which is exactly the
-field `ksa_compliance` reads to build per-line VAT categories for the ZATCA XML.
+``item_tax_template`` is set and ERPNext's own ``calculate_taxes_and_totals`` prices
+each line from it; `ksa_compliance` reads that same link field, and the ZATCA
+category configured on the template, to build the per-line VAT category for the XML.
+
+Three things about that are worth knowing before trusting it:
+
+* ERPNext only applies a template's rate when the header tax row's ``account_head``
+  appears inside that template (``taxes_and_totals._get_tax_rate``). A template
+  pricing a different VAT account is silently ignored and the line takes the header
+  rate.
+* An item master that already carries a template overrides the one passed in, while
+  the API response still echoes what the caller sent.
+* A template whose ``custom_zatca_item_tax_category`` is blank files as *standard*,
+  so a zero-rated line can be arithmetically right and categorised wrong.
 
 **Money and dates go through frappe.utils.** ``flt``/``cint``/``getdate`` absorb
 ``None``, ``''`` and locale-formatted numbers; bare ``float()``/``int()`` raise.
@@ -89,9 +100,11 @@ def _resolve_taxes(payload: dict, company: str, doc) -> list:
     2. A named template in ``tax_template``.
     3. The company's default Sales Taxes and Charges Template.
 
-    In all three cases the per-item ``item_tax_template`` set in
-    :func:`_append_items` still governs which lines are actually taxed and at what
-    rate; these rows only declare the account and charge basis.
+    These rows declare the account and charge basis. The per-item
+    ``item_tax_template`` set in :func:`_append_items` overrides the rate **only for
+    lines whose template prices this row's ``account_head``** - see the module
+    docstring. Keep every item tax template on the same VAT account as the header row,
+    or per-line rates are silently ignored.
     """
     if payload.get('taxes'):
         rows = []

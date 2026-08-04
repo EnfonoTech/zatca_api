@@ -116,10 +116,14 @@ fresh duplicate on every run.
 
 - **Submitted invoices are never modified.** Re-posting one rewrites GL entries
   behind the ledger, and once ZATCA has cleared an invoice it is legally immutable.
-- **Taxes are computed by ERPNext.** Per-row `item_tax_template` is set and
-  ERPNext fills `item_wise_tax_detail` — the field `ksa_compliance` reads for
-  per-line VAT categories. Flattening templates into one `On Net Total` row would
-  charge standard VAT on zero-rated and exempt lines.
+- **Taxes are computed by ERPNext.** The per-row `item_tax_template` is set and
+  ERPNext prices each line from it. `ksa_compliance` then reads that same link field
+  and the ZATCA category configured on the template to build the per-line VAT
+  category for the XML. Flattening templates into one `On Net Total` row would charge
+  standard VAT on zero-rated and exempt lines.
+  This holds only where every template prices the same VAT account as the header tax
+  row, no item master carries a conflicting template, and each template has its ZATCA
+  category set — see `docs/USER_GUIDE.md` §Taxes.
 - **No `frappe.set_user('Administrator')`.** Every endpoint checks the *session
   user's* DocType permissions. A test asserts no module in the app calls
   `set_user`.

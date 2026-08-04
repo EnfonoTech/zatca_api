@@ -283,7 +283,7 @@
         },
         "item_tax_template": {
           "type": "string",
-          "description": "Per-line tax template. Send this whenever lines have different VAT treatment (standard / zero-rated / exempt), otherwise every line is taxed the same and ZATCA gets the wrong per-line VAT category."
+          "description": "Per-line VAT treatment: the name of an existing Item Tax Template for the invoice's company. Send it on every line of any invoice that can mix standard, zero-rated or exempt items, and give each VAT category its own item_code -- one code across two templates collapses ERPNext's per-line tax detail, so ZATCA rejects the filing (BR-CO-14/BR-CO-15). Templates are never auto-created: an unknown name is a rejected request, nothing is written. Ask for the exact names, which carry the company abbreviation as a suffix. On a credit note, resend it per line; omitted, it is inherited from the invoice named in return_against."
         },
         "discount_percentage": {
           "type": "number",

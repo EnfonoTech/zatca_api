@@ -132,6 +132,7 @@
   <a href="#errors">Errors &amp; retries</a>
   <div class="grp">Ship it</div>
   <a href="#pseudo">Implementation outline</a>
+  <a href="#postman">Postman collection</a>
   <a href="#checklist">Go-live checklist</a>
 </nav>
 
@@ -1392,6 +1393,250 @@ that is not exactly 5, or a missing district. Run <code>validate_payload</code> 
 }</code></pre><p>ZATCA only reports this at clearance &mdash; by which point the invoice is submitted and posted to the ledger, and unwinding it is a manual job. We refuse the payload instead.</p>
 </section>
 
+<section id="taxes">
+<h2>VAT categories &amp; item tax templates</h2>
+
+<p>Real invoices are not all one rate. A single invoice can carry standard-rated lines,
+zero-rated exports and VAT-exempt services at the same time, and ZATCA wants each of them
+declared under its own VAT category with its own exemption reason. That is what
+<code>item_tax_template</code> is for.</p>
+
+<div class="note">
+<p><strong>The division of labour.</strong> You send a <strong>template name per line</strong>.
+We hold the mapping from that name to the ZATCA category and exemption code. You never send
+category codes, percentages or <code>VATEX-SA-*</code> values yourself.</p>
+</div>
+
+<h3>The categories</h3>
+<p>These are the templates on the test site. Your live site will have the same shapes with its
+own company suffix &mdash; <strong>ask us for the exact names</strong> and hard-code nothing.</p>
+<div class="scroll"><table>
+<thead><tr><th>Send this as <code>item_tax_template</code></th><th>Rate</th>
+<th>ZATCA category</th><th>Exemption code in the filing</th><th>Use for</th></tr></thead>
+<tbody>
+<tr><td><code>KSA VAT 15 - ZTC</code></td><td>15%</td><td><code>S</code> standard</td>
+    <td>&mdash;</td><td>Ordinary domestic sales</td></tr>
+<tr><td><code>KSA Zero Rated - ZTC</code></td><td>0%</td><td><code>Z</code> zero-rated</td>
+    <td><code>VATEX-SA-32</code></td><td>Exports of goods and services</td></tr>
+<tr><td><code>KSA Exempt - ZTC</code></td><td>0%</td><td><code>E</code> exempt</td>
+    <td><code>VATEX-SA-29</code></td><td>Financial services, life insurance, some real estate</td></tr>
+</tbody></table></div>
+<p>ZATCA also defines <code>O</code> (outside the scope of VAT). Tell us if you need it and we
+will add the template.</p>
+
+<h3>Proved, not asserted</h3>
+<p>This exact request cleared on the test site. Three lines, three templates, three
+categories:</p>
+<p class="lbl">Request</p>
+<pre><code>{
+  &quot;external_id&quot;: &quot;DOC-MIX3-1785846852&quot;,
+  &quot;customer&quot;: &quot;Al Rajhi Trading Est&quot;,
+  &quot;company&quot;: &quot;ZATCA Test Co&quot;,
+  &quot;tax_id&quot;: &quot;300000000000003&quot;,
+  &quot;address_title&quot;: &quot;Al Rajhi Trading Est Billing&quot;,
+  &quot;address_parts&quot;: {
+    &quot;street&quot;: &quot;Olaya Street&quot;,
+    &quot;building_number&quot;: &quot;4521&quot;,
+    &quot;district&quot;: &quot;Al Murabba&quot;,
+    &quot;city&quot;: &quot;Riyadh&quot;,
+    &quot;postal_code&quot;: &quot;12613&quot;,
+    &quot;country&quot;: &quot;Saudi Arabia&quot;
+  },
+  &quot;items&quot;: [
+    {
+      &quot;item_code&quot;: &quot;SVC-IMPL&quot;,
+      &quot;qty&quot;: 1,
+      &quot;rate&quot;: 1000,
+      &quot;uom&quot;: &quot;Nos&quot;,
+      &quot;item_tax_template&quot;: &quot;KSA VAT 15 - ZTC&quot;
+    },
+    {
+      &quot;item_code&quot;: &quot;SVC-EXPORT&quot;,
+      &quot;qty&quot;: 1,
+      &quot;rate&quot;: 1000,
+      &quot;uom&quot;: &quot;Nos&quot;,
+      &quot;item_tax_template&quot;: &quot;KSA Zero Rated - ZTC&quot;
+    },
+    {
+      &quot;item_code&quot;: &quot;SVC-EXEMPT&quot;,
+      &quot;qty&quot;: 1,
+      &quot;rate&quot;: 1000,
+      &quot;uom&quot;: &quot;Nos&quot;,
+      &quot;item_tax_template&quot;: &quot;KSA Exempt - ZTC&quot;
+    }
+  ],
+  &quot;submit&quot;: true
+}</code></pre>
+<p class="lbl">Response</p>
+<pre><code>{
+  &quot;success&quot;: true,
+  &quot;data&quot;: {
+    &quot;invoice&quot;: {
+      &quot;invoice&quot;: &quot;ACC-SINV-2026-00022&quot;,
+      &quot;external_id&quot;: &quot;DOC-MIX3-1785846852&quot;,
+      &quot;docstatus&quot;: 1,
+      &quot;status&quot;: &quot;Unpaid&quot;,
+      &quot;is_return&quot;: 0,
+      &quot;return_against&quot;: null,
+      &quot;return_reason&quot;: &quot;&quot;,
+      &quot;company&quot;: &quot;ZATCA Test Co&quot;,
+      &quot;customer&quot;: &quot;Al Rajhi Trading Est&quot;,
+      &quot;customer_name&quot;: &quot;Al Rajhi Trading Est&quot;,
+      &quot;tax_id&quot;: &quot;300000000000003&quot;,
+      &quot;posting_date&quot;: &quot;2026-08-04&quot;,
+      &quot;currency&quot;: &quot;SAR&quot;,
+      &quot;conversion_rate&quot;: 1.0,
+      &quot;net_total&quot;: 3000.0,
+      &quot;total_taxes_and_charges&quot;: 150.0,
+      &quot;grand_total&quot;: 3150.0,
+      &quot;items&quot;: [
+        {
+          &quot;idx&quot;: 1,
+          &quot;item_code&quot;: &quot;SVC-IMPL&quot;,
+          &quot;item_name&quot;: &quot;Implementation services&quot;,
+          &quot;qty&quot;: 1.0,
+          &quot;uom&quot;: &quot;Nos&quot;,
+          &quot;rate&quot;: 1000.0,
+          &quot;amount&quot;: 1000.0,
+          &quot;net_amount&quot;: 1000.0,
+          &quot;item_tax_template&quot;: &quot;KSA VAT 15 - ZTC&quot;
+        },
+        {
+          &quot;idx&quot;: 2,
+          &quot;item_code&quot;: &quot;SVC-EXPORT&quot;,
+          &quot;item_name&quot;: &quot;Export services&quot;,
+          &quot;qty&quot;: 1.0,
+          &quot;uom&quot;: &quot;Nos&quot;,
+          &quot;rate&quot;: 1000.0,
+          &quot;amount&quot;: 1000.0,
+          &quot;net_amount&quot;: 1000.0,
+          &quot;item_tax_template&quot;: &quot;KSA Zero Rated - ZTC&quot;
+        },
+        {
+          &quot;idx&quot;: 3,
+          &quot;item_code&quot;: &quot;SVC-EXEMPT&quot;,
+          &quot;item_name&quot;: &quot;Financial advisory (VAT exempt)&quot;,
+          &quot;qty&quot;: 1.0,
+          &quot;uom&quot;: &quot;Nos&quot;,
+          &quot;rate&quot;: 1000.0,
+          &quot;amount&quot;: 1000.0,
+          &quot;net_amount&quot;: 1000.0,
+          &quot;item_tax_template&quot;: &quot;KSA Exempt - ZTC&quot;
+        }
+      ],
+      &quot;taxes&quot;: [
+        {
+          &quot;account_head&quot;: &quot;VAT 15 - ZTC&quot;,
+          &quot;description&quot;: &quot;VAT 15%&quot;,
+          &quot;rate&quot;: 15.0,
+          &quot;tax_amount&quot;: 150.0,
+          &quot;total&quot;: 3150.0
+        }
+      ]
+    },
+    &quot;zatca&quot;: {
+      &quot;phase&quot;: &quot;Phase 2&quot;,
+      &quot;invoice_counter&quot;: 12,
+      &quot;integration_status&quot;: &quot;Ready For Batch&quot;,
+      &quot;invoice_type_transaction&quot;: &quot;0100000&quot;,
+      &quot;is_cleared&quot;: false
+    }
+  }
+}</code></pre>
+
+<p>Note the totals: <strong>net 3000, VAT 150, grand total 3150</strong>. Only the
+standard-rated line is taxed. And this is the VAT breakdown ZATCA actually received, read back
+out of the signed XML:</p>
+<div class="scroll"><table>
+<thead><tr><th>Category</th><th>Taxable</th><th>Tax</th><th>Rate</th><th>Exemption reason</th></tr></thead>
+<tbody>
+<tr><td><code>S</code></td><td>1000.00</td><td>150.00</td><td>15%</td><td>&mdash;</td></tr>
+<tr><td><code>Z</code></td><td>1000.00</td><td>0.00</td><td>0%</td><td><code>VATEX-SA-32</code></td></tr>
+<tr><td><code>E</code></td><td>1000.00</td><td>0.00</td><td>0%</td><td><code>VATEX-SA-29</code></td></tr>
+</tbody></table></div>
+<p>You can pull this yourself for any invoice with
+<code>get_invoice?invoice=&lt;name&gt;&amp;include_xml=1</code> and reading the
+<code>cac:TaxSubtotal</code> blocks. That is the only way to <em>prove</em> a mixed-rate
+invoice was split correctly &mdash; see the warning below about what the response cannot tell
+you.</p>
+
+<h3>One <code>item_code</code> per VAT category &mdash; not negotiable</h3>
+<div class="danger">
+<p>ERPNext keys its per-line tax detail by <strong>item code</strong>. Two lines that share a
+code but carry different templates collapse into one entry: the standard-rated subtotal
+reaches ZATCA with a tax amount of <code>0.00</code> while the invoice header still declares
+the full VAT. ZATCA rejects the filing with <code>BR-CO-14</code> and
+<code>BR-CO-15</code>.</p>
+<p>Verified as an A/B pair on the test site &mdash; identical payloads otherwise:</p>
+<ul>
+<li>same <code>item_code</code> on both lines &rarr; <strong>Rejected</strong></li>
+<li>distinct <code>item_code</code> per line &rarr; <strong>Cleared</strong></li>
+</ul>
+<p>ERPNext accepts the bad one and the totals look right, so nothing warns you. Give every
+VAT category its own item code.</p>
+</div>
+
+<h3>Credit notes carry the tax treatment too</h3>
+<p>A credit note against a zero-rated or exempt sale must be credited at that same treatment.
+Resend <code>item_tax_template</code> on each credit-note line.</p>
+<p>If you omit it, <strong>we now inherit each line's template from the invoice named in
+<code>return_against</code></strong>, so the credit note matches the original. An explicit
+value in your payload always wins, because a partial return can legitimately differ.</p>
+<div class="warn">
+<p><strong>Why this matters, measured.</strong> Before that inheritance existed, a zero-rated
+invoice of 1,000 charged <code>0</code> VAT, and crediting it without the template produced
+VAT of <code>-150</code> &mdash; a 150 SAR VAT refund against a sale that never carried VAT.
+The request succeeded and the response looked ordinary. Understating VAT this way is the kind
+of thing an audit finds, so send the template explicitly even though we now cover for its
+absence.</p>
+</div>
+
+<h3>Templates must already exist</h3>
+<p>Unknown customers, items and units of measure are created on demand. <strong>Item tax
+templates are not.</strong> An unrecognised name is a hard rejection:</p>
+<pre><code>{
+  &quot;success&quot;: false,
+  &quot;errors&quot;: [
+    {
+      &quot;code&quot;: &quot;validation_error&quot;,
+      &quot;message&quot;: &quot;Item Tax Template KSA Zero Rated - XYZ not found for company ZATCA Test Co.&quot;,
+      &quot;details&quot;: { &quot;field&quot;: &quot;item_tax_template&quot;, &quot;item_code&quot;: &quot;SVC-EXPORT&quot; }
+    }
+  ]
+}</code></pre>
+<p>Nothing is written when this happens. The names are per company and carry its abbreviation
+as a suffix, which is why you must take them from us rather than construct them. Sending the
+bare title (<code>KSA Zero Rated</code>) also resolves, if you would rather not hard-code the
+suffix.</p>
+
+<h3>What the response can and cannot tell you</h3>
+<div class="warn">
+<p><code>data.invoice.items[].item_tax_template</code> is an <strong>echo of what you
+sent</strong>, not proof of what was applied. ERPNext can substitute a different template when
+the item master already carries one, and the echo will not show it.</p>
+<p>Trust the numbers, not the echo: check
+<code>data.invoice.total_taxes_and_charges</code> against what you expect, and use
+<code>include_xml=1</code> when you need the per-category breakdown. A mixed invoice where the
+VAT equals 15% of the <em>whole</em> net is the signature of per-line treatment being lost.</p>
+</div>
+
+<h3>Our side of it</h3>
+<p>For completeness, so you know what to ask us to confirm when a rate looks wrong. Per-line
+rates only reach the filing when the site is configured so that:</p>
+<ul>
+<li>every item tax template prices the <strong>same VAT account</strong> as the invoice's
+    header tax row &mdash; ERPNext falls back to the header rate for any line whose template
+    does not mention that account;</li>
+<li>each template has its ZATCA category set. Left blank it silently defaults to standard, so
+    a zero-rated line files under <code>S</code> with no error anywhere;</li>
+<li>the company's country is Saudi Arabia, which is what enables the per-line tax data ZATCA
+    needs.</li>
+</ul>
+<p>All three are ours to get right, and are already right on the test site. They are listed
+here because if a zero-rated line ever comes back taxed at 15%, this is the list to have us
+check &mdash; it will not be something in your payload.</p>
+</section>
+
 <section id="payload">
 <h2>Payload fields</h2>
 <p>Key names are matched case- and separator-insensitively, so <code>"Customer Name"</code>,
@@ -1481,10 +1726,15 @@ not numbers, so leading zeros survive. And <code>tax_id</code> is 15 digits
 
 <h3>Mixed VAT rates</h3>
 <p>If <em>any</em> invoice can mix standard 15%, zero-rated exports and exempt items, you
-<strong>must</strong> send <code>item_tax_template</code> on every line. Otherwise all
-lines get the same rate and ZATCA receives the wrong per-line VAT category. We will give
-you the exact template names.</p>
-<p>If every line is always standard 15%, omit it entirely.</p>
+<strong>must</strong> send <code>item_tax_template</code> on every line, and give each VAT
+category its own <code>item_code</code>. We will give you the exact template names.</p>
+<p>Omitting the field does not simply apply the header rate: ERPNext resolves a template from
+the item master, then the item group, and only falls back to the header rate if it finds
+neither. So the rate an untemplated line gets depends on the item's own history rather than on
+your payload. Send the field on every line of any invoice that could ever be mixed.</p>
+<p>If every line is always standard 15%, you can omit it.</p>
+<p><a href="#taxes">Full detail, the three categories and a cleared three-category example
+&rarr;</a></p>
 
 <div class="danger">
 <p><strong>And use a different <code>item_code</code> for each VAT category.</strong>
@@ -1834,6 +2084,69 @@ items behind.</p>
         schedule_status_poll(payload.external_id)   # step 4, with backoff</code></pre>
 </section>
 
+<section id="postman">
+<h2>Postman collection</h2>
+
+<p>A ready-to-run collection covering every endpoint, including the tax-template cases above.
+Download both files and import them into Postman.</p>
+
+<div class="cards">
+<div class="card"><h4>Collection</h4>
+<p><a href="/postman-collection.json"><code>/postman-collection.json</code></a><br>
+23 requests, with tests that assert the response shape.</p></div>
+<div class="card"><h4>Environment</h4>
+<p><a href="/postman-environment.json"><code>/postman-environment.json</code></a><br>
+The variables to fill in. Credentials are deliberately blank.</p></div>
+</div>
+
+<h3>Import and run</h3>
+<pre><code>1. Postman -&gt; Import -&gt; paste both URLs above (or drop in the two files)
+2. Pick the "ZATCA API" environment, top right
+3. Fill in base_url, api_key, api_secret, company, customer
+4. Ask us for the item tax template names and paste them in
+5. Run "01 Ping". If that passes, everything else will reach us.</code></pre>
+
+<h3>What to fill in</h3>
+<div class="scroll"><table>
+<thead><tr><th>Variable</th><th>What to put there</th></tr></thead>
+<tbody>
+<tr><td><code>base_url</code></td><td>Your ERPNext URL, no trailing slash</td></tr>
+<tr><td><code>api_key</code> / <code>api_secret</code></td>
+    <td>The pair we issue you. Blank in the file on purpose &mdash; never commit them</td></tr>
+<tr><td><code>company</code></td><td>Exactly as it is spelled in ERPNext</td></tr>
+<tr><td><code>customer</code></td><td>Any customer name; it is created if unknown</td></tr>
+<tr><td><code>buyer_vat</code></td><td>A 15-digit buyer VAT number, to exercise standard (B2B) filing</td></tr>
+<tr><td><code>item_code</code>, <code>item_code_support</code>,
+        <code>item_code_export</code>, <code>item_code_exempt</code></td>
+    <td>Four <strong>distinct</strong> codes. The mixed-VAT requests need one per VAT
+        category &mdash; that is the point of them</td></tr>
+<tr><td><code>item_tax_standard</code>, <code>item_tax_zero</code>,
+        <code>item_tax_exempt</code></td>
+    <td><strong>Ask us.</strong> The names carry your company's abbreviation and cannot be
+        guessed</td></tr>
+<tr><td><code>vat_account</code></td><td>Your VAT account name, for the explicit
+    <code>taxes</code> rows</td></tr>
+</tbody></table></div>
+
+<h3>The requests worth running first</h3>
+<div class="scroll"><table>
+<thead><tr><th>#</th><th>Request</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>01</td><td>Ping</td><td>Proves the URL and the credentials. Nothing else works until it does</td></tr>
+<tr><td>02</td><td>Validate payload &mdash; dry run</td><td>Writes nothing. Iterate here while you build</td></tr>
+<tr><td>05</td><td>Create invoice (full B2B + address)</td><td>The shape most of your traffic will take</td></tr>
+<tr><td>06</td><td>Mixed VAT (standard + zero-rated)</td><td>Asserts VAT of 150, not 300, on net 2000</td></tr>
+<tr><td>07</td><td>Three VAT categories</td><td>Standard + zero-rated + exempt on one invoice</td></tr>
+<tr><td>09</td><td>The <code>BR-CO-14/15</code> trap</td><td>Shows the payload that gets a filing rejected, and why nothing warns you</td></tr>
+<tr><td>16</td><td>Get invoice with <code>include_xml=1</code></td><td>Counts the VAT categories in the filing itself</td></tr>
+</tbody></table></div>
+
+<div class="note">
+<p>Requests 06, 07 and 09 all depend on the item tax template variables. Set those before you
+run them, or they will fail on an unknown template rather than on anything meaningful.</p>
+</div>
+</section>
+
 <section id="checklist">
 <h2>Go-live checklist</h2>
 <p>Tell us when every line is ticked, and give us the <code>external_id</code> of one
@@ -1859,6 +2172,12 @@ invoice of each kind you tested.</p>
     <code>errors</code> <strong>and</strong> empty
     <code>zatca_readiness.blocking</code> for: one B2B invoice, one B2C invoice, one
     credit note, one mixed-VAT invoice</li>
+<li><strong>One real mixed-VAT invoice filed and checked with
+    <code>include_xml=1</code>.</strong> A passing dry run is not enough for this one: the dry
+    run stops at a draft and never builds the ZATCA document, so it cannot show you the
+    per-category VAT breakdown. Read the <code>cac:TaxSubtotal</code> blocks once, against a
+    real filing, and confirm each category's tax equals its taxable amount times its
+    rate</li>
 <li>Invoices are only sent once <strong>final</strong> in your system</li>
 </ul>
 </section>

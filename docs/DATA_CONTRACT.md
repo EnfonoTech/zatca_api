@@ -163,8 +163,12 @@ alternative identifier instead:
 
 If **any** invoice can contain lines with different VAT treatment — standard 15%,
 zero-rated exports, exempt items — you **must** send `item_tax_template` on every
-line. Otherwise all lines get the same rate, and ZATCA receives the wrong per-line
-VAT category.
+line, and give each VAT category its own `item_code`.
+
+Omitting the field does not simply apply the header rate: ERPNext resolves a
+template from the item master, then the item group, and only falls back to the
+header rate if it finds neither — so an untemplated line's rate depends on that
+item's history, not on your payload.
 
 We will give you the exact template names for your setup. See
 [`samples/mixed-vat-rates.json`](samples/mixed-vat-rates.json).

@@ -485,10 +485,32 @@ receipt.
 2. **`tax_template`** — a named Sales Taxes and Charges Template for the company.
 3. **The company's default template.**
 
-In all three cases the per-row `item_tax_template` still governs which lines are
-taxed and at what rate. ERPNext computes `item_wise_tax_detail`, which is exactly
-the field `ksa_compliance` reads to build per-line VAT categories for the ZATCA
-XML — so **mixed standard / zero-rated / exempt invoices come out correct**.
+In all three cases the per-row `item_tax_template` governs which lines are taxed
+and at what rate, and `ksa_compliance` builds each line's VAT category from that
+same template — specifically from `Item Tax Template.custom_zatca_item_tax_category`,
+which is where the `S` / `Z` / `E` / `O` code and the `VATEX-SA-*` exemption reason
+come from.
+
+Three preconditions have to hold for that, all of them site configuration rather
+than payload:
+
+1. Every item tax template prices the **same VAT account** as the header tax row.
+   ERPNext falls back to the header rate for any line whose template does not
+   mention that account, so a zero-rated line would be charged 15%.
+2. No item master carries a conflicting template. ERPNext substitutes the master's
+   template when the one you sent is not listed on the item, and the API response
+   still echoes the value you sent.
+3. Each template has its ZATCA category set. Blank silently means standard, so a
+   zero-rated line files under `S` with no error anywhere.
+
+Get those right and mixed standard / zero-rated / exempt invoices come out correct.
+Verify once per site by filing a real mixed invoice and reading the
+`cac:TaxSubtotal` blocks via `include_xml=1`; a dry run cannot show them, because it
+stops at a draft and never builds the ZATCA document.
+
+**Each VAT category also needs its own `item_code`** — ERPNext keys per-line tax
+detail by item code, so one code across two templates collapses them and ZATCA
+rejects the filing with `BR-CO-14` / `BR-CO-15`.
 
 If no tax rows can be resolved and ZATCA is enabled for the company, the request
 is rejected with a specific message, because `ksa_compliance` requires a non-empty

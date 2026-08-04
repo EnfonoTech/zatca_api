@@ -564,12 +564,20 @@ on a non-KSA site or during a legacy migration.</p>
 other type takes <code>rate</code>.</p>
 
 <div class="note">
-<p>In all three cases the per-row <code>item_tax_template</code> still governs which
-lines are taxed and at what rate. ERPNext fills
-<code>item_wise_tax_detail</code> &mdash; exactly the field
-<code>ksa_compliance</code> reads to build per-line VAT categories for the ZATCA
-XML. So <strong>mixed standard / zero-rated / exempt invoices come out
-correct</strong>.</p>
+<p>In all three cases the per-row <code>item_tax_template</code> governs which lines
+are taxed and at what rate, and <code>ksa_compliance</code> builds each line's VAT
+category from that same template &mdash; from its
+<code>custom_zatca_item_tax_category</code>, which supplies the <code>S</code> /
+<code>Z</code> / <code>E</code> / <code>O</code> code and the
+<code>VATEX-SA-*</code> exemption reason.</p>
+<p>That holds where the site is configured so every template prices the
+<strong>same VAT account</strong> as the header tax row, no item master carries a
+conflicting template, and each template has its ZATCA category set. A template left
+blank silently files as standard.</p>
+<p><strong>Each VAT category needs its own <code>item_code</code>.</strong> ERPNext
+keys per-line tax detail by item code, so one code across two templates collapses
+them and ZATCA rejects the filing (<code>BR-CO-14</code> /
+<code>BR-CO-15</code>).</p>
 </div>
 
 <h3>Payment means &mdash; requires <code>is_pos</code></h3>
