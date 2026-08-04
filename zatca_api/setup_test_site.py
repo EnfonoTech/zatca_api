@@ -15,13 +15,22 @@ produces a genuine, verifiable QR immediately. Phase 2 additionally needs the ZA
 CLI, a provisioned CSID and sandbox credentials; layer that on afterwards when you
 want to exercise clearance.
 
-Two fresh-site traps this works around, both from erpnext's after_install fixtures not
-having landed:
+**The fresh-site trap this works around.** ERPNext creates UOM, Item Group, Customer
+Group, Territory, Warehouse Type, Gender, Mode of Payment and Supplier Group from its
+**setup wizard**, not from ``bench install-app erpnext``. A site created by
+``bench new-site`` + ``install-app`` and never taken through the wizard therefore has
+all of those tables empty, and the failures look unrelated to each other:
 
-* ``Warehouse Type`` is empty, so creating a Company throws
-  ``LinkValidationError: Could not find Warehouse Type: Transit`` while building its
-  default warehouses.
-* ``Gender`` is empty, which trips other erpnext master creation.
+* ``LinkValidationError: Could not find Warehouse Type: Transit`` when creating a
+  Company, which builds default warehouses.
+* ``LinkValidationError: Could not find Default Unit of Measure: Nos`` when creating
+  an Item.
+* No Item Group / Customer Group / Territory for anything to default to.
+
+Rather than hand-creating each master as it trips, this calls ERPNext's own
+``setup_wizard.operations.install_fixtures.install(country)`` -- the same code the
+wizard runs -- so the site ends up with the standard master set instead of a
+hand-rolled subset.
 """
 
 import frappe
@@ -75,13 +84,70 @@ def run(with_api_keys: int = 1):
 
 
 def _ensure_erpnext_masters() -> dict:
-    """Create the erpnext master records a fresh site can be missing.
+    """Run ERPNext's setup-wizard fixtures if the standard masters are missing.
 
-    Company creation builds default warehouses, which link to Warehouse Type
-    'Transit'. On a site where erpnext's after_install fixtures did not land, that
-    record does not exist and the insert throws LinkValidationError.
+    These are NOT created by ``bench install-app erpnext`` -- they come from the setup
+    wizard. A site that never went through the wizard has empty UOM, Item Group,
+    Customer Group, Territory, Warehouse Type, Gender, Mode of Payment and Supplier
+    Group tables, and every downstream insert fails with a different
+    LinkValidationError.
+
+    Calling erpnext's own installer keeps the site's master data standard. Falls back
+    to creating just the records this seeder needs if that import is unavailable.
     """
-    created = {'warehouse_types': [], 'genders': []}
+    probes = ('UOM', 'Item Group', 'Customer Group', 'Territory')
+    missing = [dt for dt in probes if not frappe.db.count(dt)]
+    if not missing:
+        return {'status': 'masters already present'}
+
+    country = frappe.db.get_value('Company', COMPANY, 'country') or 'Saudi Arabia'
+
+    try:
+        from erpnext.setup.setup_wizard.operations import install_fixtures
+    except ImportError:
+        return _minimal_masters_fallback(f'erpnext install_fixtures unavailable; missing={missing}')
+
+    # frappe.flags.in_setup_wizard keeps the fixtures' own validations lenient, which
+    # is what the wizard itself does when it calls this.
+    previous = frappe.flags.in_setup_wizard
+    frappe.flags.in_setup_wizard = True
+    try:
+        install_fixtures.install(country)
+        frappe.db.commit()
+    except Exception as exc:  # noqa: BLE001 - report and fall back rather than abort
+        frappe.db.rollback()
+        return _minimal_masters_fallback(f'install_fixtures.install failed: {exc}')
+    finally:
+        frappe.flags.in_setup_wizard = previous
+
+    return {
+        'status': 'ran erpnext install_fixtures',
+        'country': country,
+        'was_missing': missing,
+        'uom_count': frappe.db.count('UOM'),
+        'item_group_count': frappe.db.count('Item Group'),
+    }
+
+
+def _minimal_masters_fallback(reason: str) -> dict:
+    """Create only the masters this seeder cannot proceed without."""
+    created = {
+        'reason': reason,
+        'uoms': [],
+        'warehouse_types': [],
+        'genders': [],
+        'item_groups': [],
+        'customer_groups': [],
+        'territories': [],
+    }
+
+    for name in ('Nos', 'Unit'):
+        if not frappe.db.exists('UOM', name):
+            doc = frappe.new_doc('UOM')
+            doc.uom_name = name
+            doc.must_be_whole_number = 1 if name == 'Nos' else 0
+            doc.insert(ignore_permissions=True)
+            created['uoms'].append(name)
 
     for name in WAREHOUSE_TYPES:
         if not frappe.db.exists('Warehouse Type', name):
@@ -98,6 +164,31 @@ def _ensure_erpnext_masters() -> dict:
                 doc.insert(ignore_permissions=True)
                 created['genders'].append(name)
 
+    for doctype, field, root, children in (
+        ('Item Group', 'item_group_name', 'All Item Groups', ('Services', 'Products')),
+        ('Customer Group', 'customer_group_name', 'All Customer Groups', ('Commercial',)),
+        ('Territory', 'territory_name', 'All Territories', ('Saudi Arabia',)),
+    ):
+        parent_field = {
+            'Item Group': 'parent_item_group',
+            'Customer Group': 'parent_customer_group',
+            'Territory': 'parent_territory',
+        }[doctype]
+        if not frappe.db.exists(doctype, root):
+            doc = frappe.new_doc(doctype)
+            doc.set(field, root)
+            doc.is_group = 1
+            doc.insert(ignore_permissions=True)
+        for child in children:
+            if not frappe.db.exists(doctype, child):
+                doc = frappe.new_doc(doctype)
+                doc.set(field, child)
+                doc.set(parent_field, root)
+                doc.is_group = 0
+                doc.insert(ignore_permissions=True)
+                created[doctype.lower().replace(' ', '_') + 's'].append(child)
+
+    frappe.db.commit()
     return created
 
 
