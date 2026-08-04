@@ -52,6 +52,7 @@ def run(otp: str = SANDBOX_OTP, fatoora_server: str = SANDBOX):
     result = {'fatoora_server': fatoora_server}
     result['cli'] = _ensure_cli()
     result['phase_1_removed'] = _remove_phase_1()
+    result['tax_categories'] = _ensure_tax_categories()
     result['settings'] = _ensure_business_settings(result['cli'], fatoora_server)
     result['onboarding'] = _onboard(result['settings'], otp)
 
@@ -127,6 +128,63 @@ def _remove_phase_1() -> str:
         frappe.delete_doc('ZATCA Phase 1 Business Settings', name, force=True, ignore_permissions=True)
     frappe.db.commit()
     return f'removed {names}'
+
+
+def _ensure_tax_categories() -> dict:
+    """Give every tax template a ZATCA VAT category, which Phase 2 requires.
+
+    Phase 1 never needs this. On Phase 2, submitting an invoice fails with
+    ``Please set Tax Category on Sales Taxes and Charges Template <name>`` because
+    ksa_compliance has to put a VAT category code on every XML line.
+
+    ``map_tax_category`` reads ``Tax Category.custom_zatca_category`` (or
+    ``Item Tax Template.custom_zatca_item_tax_category``) and maps it to the ZATCA
+    code: S standard, E exempt, Z zero-rated, O outside scope. Anything other than
+    'Standard rate' is stored as ``"<category> || <reason>"``, and the reason half must
+    match ksa_compliance's own list exactly -- it resolves to a VATEX-SA-* code and its
+    Arabic text. 'Export of goods' is used for the zero-rated template here.
+
+    Tax Category records are setup-wizard fixtures, so a fresh site has none.
+    """
+
+    standard = 'Standard rate'
+    zero_rated = 'Zero rated goods || Export of goods'
+    created = {}
+
+    meta = frappe.get_meta('Tax Category')
+    has_field = bool(meta.get_field('custom_zatca_category'))
+
+    if not frappe.db.exists('Tax Category', 'Standard'):
+        doc = frappe.new_doc('Tax Category')
+        doc.title = 'Standard'
+        if has_field:
+            doc.custom_zatca_category = standard
+        doc.insert(ignore_permissions=True)
+        created['tax_category'] = doc.name
+    elif has_field and not frappe.db.get_value('Tax Category', 'Standard', 'custom_zatca_category'):
+        frappe.db.set_value('Tax Category', 'Standard', 'custom_zatca_category', standard)
+        created['tax_category'] = 'Standard (backfilled)'
+
+    # Sales Taxes and Charges Template needs the Tax Category link.
+    for name in frappe.get_all(
+        'Sales Taxes and Charges Template', filters={'company': COMPANY}, pluck='name'
+    ):
+        if not frappe.db.get_value('Sales Taxes and Charges Template', name, 'tax_category'):
+            frappe.db.set_value('Sales Taxes and Charges Template', name, 'tax_category', 'Standard')
+            created.setdefault('templates', []).append(name)
+
+    # Item Tax Templates carry their own per-line category.
+    item_meta = frappe.get_meta('Item Tax Template')
+    if item_meta.get_field('custom_zatca_item_tax_category'):
+        for name in frappe.get_all('Item Tax Template', filters={'company': COMPANY}, pluck='name'):
+            if frappe.db.get_value('Item Tax Template', name, 'custom_zatca_item_tax_category'):
+                continue
+            category = zero_rated if 'Zero' in name else standard
+            frappe.db.set_value('Item Tax Template', name, 'custom_zatca_item_tax_category', category)
+            created.setdefault('item_tax_templates', []).append(f'{name} -> {category}')
+
+    frappe.db.commit()
+    return created or {'status': 'already configured'}
 
 
 def _ensure_business_settings(cli: dict, fatoora_server: str) -> str:
