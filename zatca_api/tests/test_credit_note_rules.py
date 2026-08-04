@@ -22,6 +22,7 @@ from zatca_api.services.invoice import (
     RETURN_REASON_FIELD,
     RETURN_REASON_MAX_LENGTH,
     _apply_return_reason,
+    _inherited_item_tax_templates,
 )
 from zatca_api.services.payload import PayloadError, normalise_invoice, validate_invoice
 
@@ -137,3 +138,55 @@ class TestFutureIssueDate(FrappeTestCase):
         with self.assertRaises(PayloadError) as caught:
             validate_invoice(self._payload('not-a-date'))
         self.assertIn('not a valid date', str(caught.exception))
+
+
+class TestInheritedItemTaxTemplate(FrappeTestCase):
+    """A credit note must not reclaim VAT the original sale never charged.
+
+    ERPNext does not carry a return line's tax treatment over from the invoice being
+    credited. Measured on a live site before this was fixed: a zero-rated invoice of
+    1,000 charged 0 VAT, and crediting it without ``item_tax_template`` produced VAT
+    of -150 -- a refund of VAT that was never collected.
+    """
+
+    def _inherited(self, payload, rows):
+        with patch('zatca_api.services.invoice.frappe.get_all', return_value=rows) as get_all:
+            result = _inherited_item_tax_templates(payload)
+        return result, get_all
+
+    def test_return_inherits_the_originals_templates(self):
+        payload = {'is_return': 1, 'return_against': 'ACC-SINV-2026-00034'}
+        rows = [{'item_code': 'SVC-EXPORT', 'item_tax_template': 'KSA Zero Rated - ZTC'}]
+        result, get_all = self._inherited(payload, rows)
+
+        self.assertEqual(result, {'SVC-EXPORT': 'KSA Zero Rated - ZTC'})
+        self.assertEqual(get_all.call_args.kwargs['filters'], {'parent': 'ACC-SINV-2026-00034'})
+
+    def test_lines_without_a_template_on_the_original_are_skipped(self):
+        rows = [
+            {'item_code': 'SVC-IMPL', 'item_tax_template': None},
+            {'item_code': 'SVC-EXPORT', 'item_tax_template': 'KSA Zero Rated - ZTC'},
+        ]
+        result, _ = self._inherited({'is_return': 1, 'return_against': 'X'}, rows)
+        self.assertEqual(result, {'SVC-EXPORT': 'KSA Zero Rated - ZTC'})
+
+    def test_a_plain_invoice_inherits_nothing(self):
+        result, get_all = self._inherited({'items': []}, [])
+        self.assertEqual(result, {})
+        get_all.assert_not_called()
+
+    def test_a_return_with_no_original_inherits_nothing(self):
+        """Nothing to read, and no query worth making."""
+        result, get_all = self._inherited({'is_return': 1}, [])
+        self.assertEqual(result, {})
+        get_all.assert_not_called()
+
+    def test_all_three_categories_are_carried_over(self):
+        rows = [
+            {'item_code': 'SVC-IMPL', 'item_tax_template': 'KSA VAT 15 - ZTC'},
+            {'item_code': 'SVC-EXPORT', 'item_tax_template': 'KSA Zero Rated - ZTC'},
+            {'item_code': 'SVC-EXEMPT', 'item_tax_template': 'KSA Exempt - ZTC'},
+        ]
+        result, _ = self._inherited({'is_return': 1, 'return_against': 'X'}, rows)
+        self.assertEqual(len(result), 3)
+        self.assertEqual(result['SVC-EXEMPT'], 'KSA Exempt - ZTC')
