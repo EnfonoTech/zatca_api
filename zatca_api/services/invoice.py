@@ -185,7 +185,36 @@ def _rows_from_template(template_name: str) -> list:
     ]
 
 
+def _inherited_item_tax_templates(payload: dict) -> dict:
+    """``item_code`` -> ``item_tax_template`` taken from the invoice being credited.
+
+    A credit note whose lines omit ``item_tax_template`` does **not** inherit the original
+    invoice's tax treatment. ERPNext re-resolves each line from the Item master, its Item
+    Group chain, and failing both the header tax row -- so crediting a zero-rated or exempt
+    sale reclaims standard VAT that was never charged.
+
+    Measured on the test site: a zero-rated invoice of 1,000 charged 0 VAT; crediting it
+    without the template produced VAT of -150, i.e. a 150 SAR VAT refund against a sale that
+    carried none. Resending the template gave the correct 0.
+
+    So the original's per-line templates are inherited whenever the caller did not name one.
+    An explicit value in the payload always wins, because a partial return can legitimately
+    differ from the original.
+    """
+    if not (payload.get('is_return') and payload.get('return_against')):
+        return {}
+
+    rows = frappe.get_all(
+        'Sales Invoice Item',
+        filters={'parent': payload['return_against']},
+        fields=['item_code', 'item_tax_template'],
+    )
+    return {row['item_code']: row['item_tax_template'] for row in rows if row['item_tax_template']}
+
+
 def _append_items(doc, payload: dict, company: str, settings) -> None:
+    inherited = _inherited_item_tax_templates(payload)
+
     for item in payload['items']:
         masters.ensure_item(item, company, settings)
 
@@ -209,6 +238,12 @@ def _append_items(doc, payload: dict, company: str, settings) -> None:
         for field in ('income_account', 'cost_center', 'warehouse'):
             if item.get(field):
                 row[field] = item[field]
+
+        if not item.get('item_tax_template') and inherited.get(item['item_code']):
+            # Carried over from the invoice being credited. It is already a valid name on
+            # that document, so if it no longer resolves the template was deleted -- leave
+            # the line alone rather than failing a request that never named it.
+            row['item_tax_template'] = inherited[item['item_code']]
 
         if item.get('item_tax_template'):
             template = masters.resolve_item_tax_template(item['item_tax_template'], company)

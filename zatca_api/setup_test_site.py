@@ -50,6 +50,25 @@ BUYER_VAT = '300000000000003'
 CUSTOMER_B2C = 'Walk-in Customer'
 ITEM_STANDARD = 'SVC-IMPL'
 ITEM_ZERO = 'SVC-EXPORT'
+ITEM_EXEMPT = 'SVC-EXEMPT'
+
+# Item Tax Template title -> (VAT rate, ksa_compliance ZATCA category).
+#
+# The category string is what actually decides the UBL VAT category code, NOT the rate:
+# `map_tax_category` reads `Item Tax Template.custom_zatca_item_tax_category` and maps the
+# half before ' || ' to S / E / Z / O, then resolves the half after it to a VATEX-SA-* code
+# and its Arabic text from its own fixed list. A template left blank silently falls back to
+# 'Standard rate', so a zero-rated line would be filed as standard -- correct arithmetic,
+# wrong VAT category. Set it at creation, never leave it to be guessed.
+#
+# Verified end to end against ZATCA's Phase 2 sandbox: a three-line invoice using all three
+# of these cleared with subtotals S 1000->150 @15%, Z 1000->0 (VATEX-SA-32) and
+# E 1000->0 (VATEX-SA-29).
+ITEM_TAX_TEMPLATES = {
+    'KSA VAT 15': (15, 'Standard rate'),
+    'KSA Zero Rated': (0, 'Zero rated goods || Export of goods'),
+    'KSA Exempt': (0, 'Exempt from Tax || Financial services mentioned in Article 29 of the VAT Regulations'),
+}
 API_USER = 'zatca-api@enfono.com'
 
 # erpnext ships these as fixtures; a site whose after_install did not complete has none.
@@ -515,24 +534,47 @@ def _ensure_tax_template(vat_account: str) -> str:
 
 
 def _ensure_item_tax_templates(vat_account: str) -> list:
-    """Standard and zero-rated templates, so mixed-rate invoices can be exercised."""
+    """One template per ZATCA VAT category, so a mixed-rate invoice can be exercised.
+
+    Each carries its ``custom_zatca_item_tax_category`` from ``ITEM_TAX_TEMPLATES`` -- see
+    the note there for why the rate alone is not enough. Existing templates are backfilled
+    rather than skipped, because a template created before this was set files under the
+    wrong VAT category.
+    """
+    has_category = bool(frappe.get_meta('Item Tax Template').get_field('custom_zatca_item_tax_category'))
     names = []
-    for title, rate in (('KSA VAT 15', 15), ('KSA Zero Rated', 0)):
+
+    for title, (rate, category) in ITEM_TAX_TEMPLATES.items():
         name = f'{title} - {ABBR}'
         if not frappe.db.exists('Item Tax Template', name):
             doc = frappe.new_doc('Item Tax Template')
             doc.title = title
             doc.company = COMPANY
+            if has_category:
+                doc.custom_zatca_item_tax_category = category
             doc.append('taxes', {'tax_type': vat_account, 'tax_rate': rate})
             doc.insert(ignore_permissions=True)
             name = doc.name
+        elif has_category and not frappe.db.get_value(
+            'Item Tax Template', name, 'custom_zatca_item_tax_category'
+        ):
+            frappe.db.set_value('Item Tax Template', name, 'custom_zatca_item_tax_category', category)
         names.append(name)
+
     return names
 
 
 def _ensure_items() -> list:
     group = frappe.db.get_value('Item Group', {'is_group': 0}, 'name')
-    for code, label in ((ITEM_STANDARD, 'Implementation services'), (ITEM_ZERO, 'Export services')):
+    # One item per VAT category on purpose: ERPNext keys its per-line tax detail by item
+    # code, so two lines sharing a code but carrying different item tax templates collapse
+    # into one entry and ZATCA receives a zero tax amount for the standard-rated category
+    # (BR-CO-14 / BR-CO-15). A mixed-rate invoice therefore needs distinct codes.
+    for code, label in (
+        (ITEM_STANDARD, 'Implementation services'),
+        (ITEM_ZERO, 'Export services'),
+        (ITEM_EXEMPT, 'Financial advisory (VAT exempt)'),
+    ):
         if frappe.db.exists('Item', code):
             continue
         doc = frappe.new_doc('Item')
@@ -544,7 +586,7 @@ def _ensure_items() -> list:
         doc.is_stock_item = 0
         doc.is_sales_item = 1
         doc.insert(ignore_permissions=True)
-    return [ITEM_STANDARD, ITEM_ZERO]
+    return [ITEM_STANDARD, ITEM_ZERO, ITEM_EXEMPT]
 
 
 def _ensure_company_address() -> str:

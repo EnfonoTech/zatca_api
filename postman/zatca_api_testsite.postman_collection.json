@@ -2,7 +2,7 @@
   "info": {
     "name": "ZATCA API \u2014 test site (zatca-test)",
     "_postman_id": "e2f4a6b8-1c3d-4e5f-8a9b-0c1d2e3f4a5b",
-    "description": "# ZATCA API \u2014 test site\n\nPre-configured for the **`zatca-test.enfonoerp.com`** test site on EFTSD-002 (`185.193.19.184`), seeded with company **ZATCA Test Co** (SAR, 15% VAT) and **ZATCA Phase 1** active.\n\n## Before you run anything\n\n1. Select the **ZATCA API \u2014 test site** environment.\n2. Paste `api_key` and `api_secret` (they are deliberately blank \u2014 never stored in the repo). Get them by re-running the seeder on the server:\n   `bench --site zatca-test.enfonoerp.com console` then\n   `from zatca_api.setup_test_site import run; run()`\n   The secret is only recoverable at creation, so a re-run issues a new one.\n3. Set `base_url` \u2014 see below.\n4. Run **01 Ping**. Everything else assumes it passed.\n\n## Reaching the site\n\nNothing to set up \u2014 **`https://zatca-test.enfonoerp.com` works over public HTTPS.**\n\nHow it routes: Cloudflare -> the control server's Caddy, which has a specific host block\n`zatca-test.enfonoerp.com { reverse_proxy 185.193.19.184:80 }`, then nginx on that box\nmatches its own `server_name` block for the host and hands off to the site. TLS is the\nexisting `*.enfonoerp.com` wildcard cert Caddy already renews via Cloudflare DNS-01, so\nno certbot was needed.\n\nBefore that block existed the wildcard's fallback answered `respond \"Site not found\" 404`\n\u2014 which is exactly what a browser saw.\n\n**`http://185.193.19.184` on its own still will not work.** That box has no\n`default_server`, so a request whose Host matches nothing falls through to the first\nserver block and is served as a different site. The hostname has to be right.\n\nAn SSH-tunnel environment is also in the repo (`..._tunnel.postman_environment.json`,\n`base_url = http://127.0.0.1:8400`) for reaching gunicorn directly if nginx or Caddy is\never the thing under investigation. It needs the tunnel running:\n\n```bash\nssh -L 8400:127.0.0.1:18400 root@194.163.160.83 \\\n  \"ssh -N -i /root/.ssh/id_ed25519 -L 18400:127.0.0.1:8000 root@185.193.19.184\"\n```\n\nEvery request carries `X-Frappe-Site-Name`, which the tunnel route needs and the HTTPS\nroute ignores.\n\n## Run them in order\n\nLater requests reuse `external_id` and `last_invoice` captured by earlier ones. Requests 03, 12 and 13 are **meant** to fail \u2014 they prove the error handling.\n\n## Expected numbers on this site\n\n| Request | Expect |\n| --- | --- |\n| 02 dry run | net 500, VAT 75, grand **575 SAR**, `valid: true` |\n| 03 B2B no address | `valid: false`, address named |\n| 04 B2C create | grand **575**, `phase: Phase 1`, QR ~1100-1600 bytes |\n| 06 B2B create | grand **5175**, **warnings empty** |\n| 07 mixed VAT | net 2000, VAT **150** (not 300) |\n| 08 credit note | `is_return: 1`, qty negative |\n\nFull reference: `docs/USER_GUIDE.md`. Spec for whoever builds the feed: `docs/DATA_CONTRACT.md`.\n",
+    "description": "# ZATCA API \u2014 test site\n\nPre-configured for the **`zatca-test.enfonoerp.com`** test site, seeded with company\n**ZATCA Test Co** (SAR, 15% VAT).\n\n## Before you run anything\n\n1. Select the **ZATCA API \u2014 test site** environment.\n2. Paste `api_key` and `api_secret`. They are deliberately blank in the repo and are never\n   committed. An operator with bench access can reissue a pair by re-running the seeder; the\n   secret is only recoverable at creation, so a re-run issues a new one.\n3. Run **01 Ping**. Everything else assumes it passed.\n\n`base_url` is already set to `https://zatca-test.enfonoerp.com`, which works over public\nHTTPS \u2014 there is nothing to tunnel or forward. A second environment\n(`..._tunnel.postman_environment.json`) exists for reaching the app server directly when the\nproxy layer itself is what is under investigation; it needs a port-forward that an operator\nsets up, and it relies on the `X-Frappe-Site-Name` header every request already carries.\n\n## Run them in order\n\nLater requests reuse `external_id` and the invoice names captured by earlier ones. Some\nrequests are **meant** to fail \u2014 they prove the error handling.\n\n## Expected numbers on this site\n\n| Request | Expect |\n| --- | --- |\n| dry run | net 500, VAT 75, grand **575 SAR**, `valid: true` |\n| B2B no address | `valid: false`, the missing address parts named |\n| B2C create | grand **575**, QR returned |\n| B2B create | grand **5175**, warnings empty |\n| mixed VAT | net 2000, VAT **150** (not 300) |\n| three VAT categories | net 3000, VAT **150**, grand **3150** |\n| credit note | `is_return: 1`, negative quantities, `return_reason` echoed |\n\nFull reference: `docs/USER_GUIDE.md`. Spec for whoever builds the feed:\n`docs/DATA_CONTRACT.md`.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -499,6 +499,7 @@
               "",
               "const d = env.data;",
               "pm.collectionVariables.set(\"last_invoice\", d.invoice.invoice);",
+              "pm.collectionVariables.set(\"last_b2b_invoice\", data.invoice.invoice);",
               "console.log(\"invoice:\", d.invoice.invoice, \"| grand_total:\", d.invoice.grand_total, d.invoice.currency);",
               "const z = d.zatca;",
               "console.log(\"zatca:\", z.available, z.phase, z.integration_status);",
@@ -613,7 +614,74 @@
       ]
     },
     {
-      "name": "08 Create credit note",
+      "name": "08 Create invoice \u2014 three VAT categories (standard + zero-rated + exempt)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.create_invoice"
+          ]
+        },
+        "description": "All three VAT categories on one invoice: standard, zero-rated and exempt.\n\nVerified against ZATCA's Phase 2 sandbox \u2014 this exact shape cleared, and the UBL it produced\ncarried three VAT subtotals:\n\n| Category | Taxable | Tax | Rate | Exemption reason |\n| --- | --- | --- | --- | --- |\n| `S` standard | 1000 | 150 | 15% | \u2014 |\n| `Z` zero-rated | 1000 | 0 | 0% | `VATEX-SA-32` |\n| `E` exempt | 1000 | 0 | 0% | `VATEX-SA-29` |\n\nHeader totals: 3000 excluding VAT, 3150 including. The exemption reason codes come from the\ntemplate's own ZATCA category \u2014 you send the template name, we hold the mapping.\n\nThree distinct `item_code` values, one per category. That is mandatory, not stylistic.",
+        "body": {
+          "raw": "{\n  \"external_id\": \"{{external_id}}\",\n  \"customer\": \"{{customer_b2b}}\",\n  \"company\": \"{{company}}\",\n  \"tax_id\": \"{{buyer_vat}}\",\n  \"address_title\": \"{{customer_b2b}} Billing\",\n  \"address_parts\": {\n    \"street\": \"Olaya Street\",\n    \"building_number\": \"4521\",\n    \"district\": \"Al Murabba\",\n    \"city\": \"Riyadh\",\n    \"postal_code\": \"12613\",\n    \"country\": \"Saudi Arabia\"\n  },\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"qty\": 1,\n      \"rate\": 1000,\n      \"uom\": \"Nos\",\n      \"item_tax_template\": \"{{item_tax_standard}}\"\n    },\n    {\n      \"item_code\": \"{{item_code_zero}}\",\n      \"qty\": 1,\n      \"rate\": 1000,\n      \"uom\": \"Nos\",\n      \"item_tax_template\": \"{{item_tax_zero}}\"\n    },\n    {\n      \"item_code\": \"{{item_code_exempt}}\",\n      \"qty\": 1,\n      \"rate\": 1000,\n      \"uom\": \"Nos\",\n      \"item_tax_template\": \"{{item_tax_exempt}}\"\n    }\n  ],\n  \"submit\": true\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// A fresh external_id every run, so this creates rather than dedupes.",
+              "pm.collectionVariables.set(\"external_id\", \"PM-\" + Date.now());",
+              ""
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "const data = env.data;",
+              "pm.test(\"net 3000\", () => pm.expect(data.invoice.net_total).to.eql(3000));",
+              "pm.test(\"VAT 150\", () => pm.expect(data.invoice.total_taxes_and_charges).to.eql(150));",
+              "pm.test(\"grand 3150\", () => pm.expect(data.invoice.grand_total).to.eql(3150));",
+              "pm.collectionVariables.set(\"last_b2b_invoice\", data.invoice.invoice);",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Create credit note",
       "request": {
         "method": "POST",
         "header": [
@@ -646,10 +714,10 @@
             "zatca_api.api.v1.create_credit_note"
           ]
         },
-        "description": "A return against `{{last_invoice}}`, captured by an earlier request.\n\nSend `qty` positive \u2014 the sign is normalised. Expect `is_return: 1`, a negative quantity and a negative net total.",
+        "description": "A return against `{{last_invoice}}`, captured by an earlier request.\n\nSend `qty` positive \u2014 the sign is normalised. Expect `is_return: 1`, a negative quantity and a negative net total.\n\nCredits `{{last_b2b_invoice}}` and uses the **same customer** as that invoice. ERPNext validates that a return matches its original's customer, so crediting a B2B invoice as the B2C walk-in customer fails. It also sends `return_reason`, which ZATCA requires on a credit note (`BR-KSA-17`).",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"external_id\": \"CN-{{external_id}}\",\n  \"customer\": \"{{customer_b2c}}\",\n  \"company\": \"{{company}}\",\n  \"posting_date\": \"{{posting_date}}\",\n  \"return_against\": \"{{last_invoice}}\",\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"qty\": 1,\n      \"rate\": 250\n    }\n  ],\n  \"return_reason\": \"Two onsite days cancelled by the customer\"\n}",
+          "raw": "{\n  \"external_id\": \"CN-{{external_id}}\",\n  \"customer\": \"{{customer_b2b}}\",\n  \"company\": \"{{company}}\",\n  \"posting_date\": \"{{posting_date}}\",\n  \"return_against\": \"{{last_b2b_invoice}}\",\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"qty\": 1,\n      \"rate\": 250\n    }\n  ],\n  \"return_reason\": \"Two onsite days cancelled by the customer\",\n  \"tax_id\": \"{{buyer_vat}}\",\n  \"address_title\": \"{{customer_b2b}} Billing\",\n  \"address_parts\": {\n    \"street\": \"Olaya Street\",\n    \"building_number\": \"4521\",\n    \"district\": \"Al Murabba\",\n    \"city\": \"Riyadh\",\n    \"postal_code\": \"12613\",\n    \"country\": \"Saudi Arabia\"\n  }\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -680,7 +748,7 @@
       ]
     },
     {
-      "name": "09 Get invoice",
+      "name": "10 Get invoice",
       "request": {
         "method": "GET",
         "header": [
@@ -738,7 +806,7 @@
       ]
     },
     {
-      "name": "10 Get ZATCA status \u2014 the cheap poll",
+      "name": "11 Get ZATCA status \u2014 the cheap poll",
       "request": {
         "method": "GET",
         "header": [
@@ -797,7 +865,7 @@
       ]
     },
     {
-      "name": "11 List invoices",
+      "name": "12 List invoices",
       "request": {
         "method": "GET",
         "header": [
@@ -868,7 +936,7 @@
       ]
     },
     {
-      "name": "12 Error \u2014 missing required fields",
+      "name": "13 Error \u2014 missing required fields",
       "request": {
         "method": "POST",
         "header": [
@@ -930,7 +998,7 @@
       ]
     },
     {
-      "name": "13 Error \u2014 unknown invoice",
+      "name": "14 Error \u2014 unknown invoice",
       "request": {
         "method": "GET",
         "header": [

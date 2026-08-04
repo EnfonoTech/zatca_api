@@ -406,10 +406,10 @@
             "zatca_api.api.v1.create_invoice"
           ]
         },
-        "description": "Everything a ZATCA Phase 2 STANDARD (B2B) invoice needs.\n\nKey points:\n- `tax_id` is mirrored onto Customer.custom_vat_registration_number, which is the field ksa_compliance reads to decide standard vs simplified. Sending only a bare tax_id elsewhere would file a B2B sale as simplified.\n- `address_parts` supplies the buyer street, building number (4 digits), district, city and postal code (5 digits) that ZATCA requires. Missing parts come back in `warnings`.\n- `item_tax_template` per line keeps mixed standard/zero-rated/exempt lines correct.\n- Set {{item_tax_template}} and {{vat_account}} in the environment, or delete those keys.",
+        "description": "Everything a ZATCA Phase 2 STANDARD (B2B) invoice needs.\n\nKey points:\n- `tax_id` is mirrored onto Customer.custom_vat_registration_number, which is the field ksa_compliance reads to decide standard vs simplified. Sending only a bare tax_id elsewhere would file a B2B sale as simplified.\n- `address_parts` supplies the buyer street, building number (4 digits), district, city and postal code (5 digits) that ZATCA requires. Missing parts come back in `warnings`.\n- Both lines here are standard-rated 15%, each with its own `item_code`. Mixed VAT\n  categories are a separate matter with a real trap in them \u2014 see the mixed-VAT\n  requests that follow.\n- Set {{item_tax_standard}} and {{vat_account}} in the environment, or delete those keys.",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"external_id\": \"{{external_id}}\",\n  \"customer\": \"{{customer}}\",\n  \"company\": \"{{company}}\",\n  \"tax_id\": \"{{buyer_vat}}\",\n  \"buyer_id_type\": \"CRN\",\n  \"buyer_id_value\": \"1010101010\",\n  \"posting_date\": \"{{posting_date}}\",\n  \"posting_time\": \"11:30:00\",\n  \"due_date\": \"{{due_date}}\",\n  \"currency\": \"SAR\",\n  \"po_no\": \"PO-4471\",\n  \"remarks\": \"Created via zatca_api\",\n  \"address_title\": \"{{customer}} Billing\",\n  \"address_parts\": {\n    \"street\": \"Olaya Street\",\n    \"additional_street\": \"Al Murabba\",\n    \"building_number\": \"4521\",\n    \"district\": \"Al Murabba\",\n    \"city\": \"Riyadh\",\n    \"postal_code\": \"12613\",\n    \"country\": \"Saudi Arabia\"\n  },\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"item_name\": \"Consulting services\",\n      \"description\": \"Implementation retainer, August 2026\",\n      \"qty\": 10,\n      \"rate\": 450,\n      \"uom\": \"Nos\",\n      \"item_tax_template\": \"{{item_tax_template}}\"\n    },\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"item_name\": \"Onsite support day\",\n      \"qty\": 2,\n      \"rate\": 1200,\n      \"discount_percentage\": 10\n    }\n  ],\n  \"taxes\": [\n    {\n      \"account_head\": \"{{vat_account}}\",\n      \"charge_type\": \"On Net Total\",\n      \"rate\": 15,\n      \"description\": \"VAT 15%\"\n    }\n  ],\n  \"submit\": true\n}",
+          "raw": "{\n  \"external_id\": \"{{external_id}}\",\n  \"customer\": \"{{customer}}\",\n  \"company\": \"{{company}}\",\n  \"tax_id\": \"{{buyer_vat}}\",\n  \"buyer_id_type\": \"CRN\",\n  \"buyer_id_value\": \"1010101010\",\n  \"posting_date\": \"{{posting_date}}\",\n  \"posting_time\": \"11:30:00\",\n  \"due_date\": \"{{due_date}}\",\n  \"currency\": \"SAR\",\n  \"po_no\": \"PO-4471\",\n  \"remarks\": \"Created via zatca_api\",\n  \"address_title\": \"{{customer}} Billing\",\n  \"address_parts\": {\n    \"street\": \"Olaya Street\",\n    \"additional_street\": \"Al Murabba\",\n    \"building_number\": \"4521\",\n    \"district\": \"Al Murabba\",\n    \"city\": \"Riyadh\",\n    \"postal_code\": \"12613\",\n    \"country\": \"Saudi Arabia\"\n  },\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"item_name\": \"Consulting services\",\n      \"description\": \"Implementation retainer, August 2026\",\n      \"qty\": 10,\n      \"rate\": 450,\n      \"uom\": \"Nos\",\n      \"item_tax_template\": \"{{item_tax_standard}}\"\n    },\n    {\n      \"item_code\": \"{{item_code_support}}\",\n      \"item_name\": \"Onsite support day\",\n      \"qty\": 2,\n      \"rate\": 1200,\n      \"discount_percentage\": 10,\n      \"item_tax_template\": \"{{item_tax_standard}}\"\n    }\n  ],\n  \"taxes\": [\n    {\n      \"account_head\": \"{{vat_account}}\",\n      \"charge_type\": \"On Net Total\",\n      \"rate\": 15,\n      \"description\": \"VAT 15%\"\n    }\n  ],\n  \"submit\": true\n}",
           "options": {
             "raw": {
               "language": "json"
@@ -468,7 +468,286 @@
       ]
     },
     {
-      "name": "06 Create invoice (legacy key names)",
+      "name": "06 Create invoice \u2014 mixed VAT (standard + zero-rated)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.create_invoice"
+          ]
+        },
+        "description": "Two VAT categories on one invoice: standard 15% and zero-rated.\n\n`item_tax_template` on **every** line is what splits the VAT breakdown ZATCA receives. Send\nit and the filing carries two categories \u2014 `S` at 15% and `Z` at 0% with an exemption reason\ncode. Omit it and every line inherits one rate, so the per-line VAT category is wrong even\nthough the totals look plausible.\n\n**Each VAT category needs its own `item_code`.** ERPNext keys its per-line tax detail by item\ncode, so two lines sharing a code but carrying different templates collapse into one entry:\nthe standard-rated subtotal reaches ZATCA as `0.00` while the header still declares the full\nVAT, and the filing is rejected with `BR-CO-14` / `BR-CO-15`. See the trap request below.\n\nExpected here: net 2000, VAT **150** (not 300), grand total 2150.",
+        "body": {
+          "raw": "{\n  \"external_id\": \"{{external_id}}\",\n  \"customer\": \"{{customer}}\",\n  \"company\": \"{{company}}\",\n  \"tax_id\": \"{{buyer_vat}}\",\n  \"address_title\": \"{{customer}} Billing\",\n  \"address_parts\": {\n    \"street\": \"Olaya Street\",\n    \"building_number\": \"4521\",\n    \"district\": \"Al Murabba\",\n    \"city\": \"Riyadh\",\n    \"postal_code\": \"12613\",\n    \"country\": \"Saudi Arabia\"\n  },\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"item_name\": \"Local consulting\",\n      \"qty\": 1,\n      \"rate\": 1000,\n      \"uom\": \"Nos\",\n      \"item_tax_template\": \"{{item_tax_standard}}\"\n    },\n    {\n      \"item_code\": \"{{item_code_export}}\",\n      \"item_name\": \"Exported services\",\n      \"qty\": 1,\n      \"rate\": 1000,\n      \"uom\": \"Nos\",\n      \"item_tax_template\": \"{{item_tax_zero}}\"\n    }\n  ],\n  \"taxes\": [\n    {\n      \"account_head\": \"{{vat_account}}\",\n      \"charge_type\": \"On Net Total\",\n      \"rate\": 15,\n      \"description\": \"VAT 15%\"\n    }\n  ]\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// A fresh external_id every run, so this creates rather than dedupes.",
+              "pm.collectionVariables.set(\"external_id\", \"PM-\" + Date.now());",
+              ""
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "const data = env.data;",
+              "pm.test(\"VAT is 150, not 300\", () => pm.expect(data.invoice.total_taxes_and_charges).to.eql(150));",
+              "pm.test(\"net is 2000\", () => pm.expect(data.invoice.net_total).to.eql(2000));",
+              "pm.collectionVariables.set(\"last_invoice\", data.invoice.invoice);",
+              "// Both lines must have kept their own template.",
+              "const tpls = data.invoice.items.map(i => i.item_tax_template);",
+              "pm.test(\"each line kept its template\", () => pm.expect(new Set(tpls).size).to.eql(2));",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Create invoice \u2014 three VAT categories (standard + zero-rated + exempt)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.create_invoice"
+          ]
+        },
+        "description": "All three VAT categories on one invoice: standard, zero-rated and exempt.\n\nVerified against ZATCA's Phase 2 sandbox \u2014 this exact shape cleared, and the UBL it produced\ncarried three VAT subtotals:\n\n| Category | Taxable | Tax | Rate | Exemption reason |\n| --- | --- | --- | --- | --- |\n| `S` standard | 1000 | 150 | 15% | \u2014 |\n| `Z` zero-rated | 1000 | 0 | 0% | `VATEX-SA-32` |\n| `E` exempt | 1000 | 0 | 0% | `VATEX-SA-29` |\n\nHeader totals: 3000 excluding VAT, 3150 including. The exemption reason codes come from the\ntemplate's own ZATCA category \u2014 you send the template name, we hold the mapping.\n\nThree distinct `item_code` values, one per category. That is mandatory, not stylistic.",
+        "body": {
+          "raw": "{\n  \"external_id\": \"{{external_id}}\",\n  \"customer\": \"{{customer}}\",\n  \"company\": \"{{company}}\",\n  \"tax_id\": \"{{buyer_vat}}\",\n  \"address_title\": \"{{customer}} Billing\",\n  \"address_parts\": {\n    \"street\": \"Olaya Street\",\n    \"building_number\": \"4521\",\n    \"district\": \"Al Murabba\",\n    \"city\": \"Riyadh\",\n    \"postal_code\": \"12613\",\n    \"country\": \"Saudi Arabia\"\n  },\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"item_name\": \"Local consulting\",\n      \"qty\": 1,\n      \"rate\": 1000,\n      \"uom\": \"Nos\",\n      \"item_tax_template\": \"{{item_tax_standard}}\"\n    },\n    {\n      \"item_code\": \"{{item_code_export}}\",\n      \"item_name\": \"Exported services\",\n      \"qty\": 1,\n      \"rate\": 1000,\n      \"uom\": \"Nos\",\n      \"item_tax_template\": \"{{item_tax_zero}}\"\n    },\n    {\n      \"item_code\": \"{{item_code_exempt}}\",\n      \"item_name\": \"Financial advisory\",\n      \"qty\": 1,\n      \"rate\": 1000,\n      \"uom\": \"Nos\",\n      \"item_tax_template\": \"{{item_tax_exempt}}\"\n    }\n  ],\n  \"taxes\": [\n    {\n      \"account_head\": \"{{vat_account}}\",\n      \"charge_type\": \"On Net Total\",\n      \"rate\": 15,\n      \"description\": \"VAT 15%\"\n    }\n  ]\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// A fresh external_id every run, so this creates rather than dedupes.",
+              "pm.collectionVariables.set(\"external_id\", \"PM-\" + Date.now());",
+              ""
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "const data = env.data;",
+              "pm.test(\"net is 3000\", () => pm.expect(data.invoice.net_total).to.eql(3000));",
+              "pm.test(\"VAT is 150 \u2014 only the standard line is taxed\",",
+              "    () => pm.expect(data.invoice.total_taxes_and_charges).to.eql(150));",
+              "pm.test(\"grand total is 3150\", () => pm.expect(data.invoice.grand_total).to.eql(3150));",
+              "pm.collectionVariables.set(\"last_invoice\", data.invoice.invoice);",
+              "pm.test(\"three lines, three templates\",",
+              "    () => pm.expect(new Set(data.invoice.items.map(i => i.item_tax_template)).size).to.eql(3));",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 Dry run \u2014 mixed VAT (check before you file)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.validate_payload",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.validate_payload"
+          ]
+        },
+        "description": "The same mixed-VAT payload as request 06, priced and validated without writing anything. `totals.tax_rows` shows the VAT that would be charged, and `zatca_readiness` tells you how ZATCA would classify the invoice \u2014 before any document exists. Run this first whenever you change how you build tax lines.",
+        "body": {
+          "raw": "{\n  \"external_id\": \"{{external_id}}\",\n  \"customer\": \"{{customer}}\",\n  \"company\": \"{{company}}\",\n  \"tax_id\": \"{{buyer_vat}}\",\n  \"address_title\": \"{{customer}} Billing\",\n  \"address_parts\": {\n    \"street\": \"Olaya Street\",\n    \"building_number\": \"4521\",\n    \"district\": \"Al Murabba\",\n    \"city\": \"Riyadh\",\n    \"postal_code\": \"12613\",\n    \"country\": \"Saudi Arabia\"\n  },\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"item_name\": \"Local consulting\",\n      \"qty\": 1,\n      \"rate\": 1000,\n      \"uom\": \"Nos\",\n      \"item_tax_template\": \"{{item_tax_standard}}\"\n    },\n    {\n      \"item_code\": \"{{item_code_export}}\",\n      \"item_name\": \"Exported services\",\n      \"qty\": 1,\n      \"rate\": 1000,\n      \"uom\": \"Nos\",\n      \"item_tax_template\": \"{{item_tax_zero}}\"\n    }\n  ],\n  \"taxes\": [\n    {\n      \"account_head\": \"{{vat_account}}\",\n      \"charge_type\": \"On Net Total\",\n      \"rate\": 15,\n      \"description\": \"VAT 15%\"\n    }\n  ]\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// A fresh external_id every run, so this creates rather than dedupes.",
+              "pm.collectionVariables.set(\"external_id\", \"PM-\" + Date.now());",
+              ""
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "const data = env.data;",
+              "pm.test(\"valid\", () => pm.expect(data.valid).to.be.true);",
+              "pm.test(\"nothing was written\", () => pm.expect(data.dry_run).to.be.true);",
+              "pm.test(\"VAT would be 150\", () => pm.expect(data.totals.total_taxes_and_charges).to.eql(150));",
+              "console.log(\"readiness:\", JSON.stringify(data.zatca_readiness, null, 1));",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Error \u2014 one item_code across two VAT categories (BR-CO-14/15 trap)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.validate_payload",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.validate_payload"
+          ]
+        },
+        "description": "**Deliberately wrong.** The same `item_code` on two lines carrying different\n`item_tax_template` values.\n\nERPNext keys per-line tax detail by item code, so the two lines collapse into one entry. The\ninvoice still totals correctly and ERPNext accepts it \u2014 but the UBL sent to ZATCA declares the\nstandard-rated category with a tax amount of `0.00` against a header that claims the full VAT,\nand the filing is rejected with `BR-CO-14` and `BR-CO-15`.\n\nThis is a dry run, so nothing is written. It shows the payload shape to avoid. The fix is one\n`item_code` per VAT category, as in the two requests above.",
+        "body": {
+          "raw": "{\n  \"external_id\": \"{{external_id}}\",\n  \"customer\": \"{{customer}}\",\n  \"company\": \"{{company}}\",\n  \"tax_id\": \"{{buyer_vat}}\",\n  \"address_title\": \"{{customer}} Billing\",\n  \"address_parts\": {\n    \"street\": \"Olaya Street\",\n    \"building_number\": \"4521\",\n    \"district\": \"Al Murabba\",\n    \"city\": \"Riyadh\",\n    \"postal_code\": \"12613\",\n    \"country\": \"Saudi Arabia\"\n  },\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"qty\": 1,\n      \"rate\": 1000,\n      \"uom\": \"Nos\",\n      \"item_tax_template\": \"{{item_tax_standard}}\"\n    },\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"qty\": 1,\n      \"rate\": 1000,\n      \"uom\": \"Nos\",\n      \"item_tax_template\": \"{{item_tax_zero}}\"\n    }\n  ],\n  \"taxes\": [\n    {\n      \"account_head\": \"{{vat_account}}\",\n      \"charge_type\": \"On Net Total\",\n      \"rate\": 15,\n      \"description\": \"VAT 15%\"\n    }\n  ]\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// A fresh external_id every run, so this creates rather than dedupes.",
+              "pm.collectionVariables.set(\"external_id\", \"PM-\" + Date.now());",
+              ""
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "const data = env.data;",
+              "// This is the point of the request: our validation does NOT catch it, and",
+              "// ERPNext prices it correctly, so it looks fine right up until ZATCA rejects",
+              "// the filing. The defence is payload discipline, not a server-side check.",
+              "pm.test(\"we report it as valid \u2014 the defect is invisible here\",",
+              "    () => pm.expect(data.valid).to.be.true);",
+              "const codes = data.would_create ? null : null;",
+              "const items = pm.request.body ? JSON.parse(pm.request.body.raw).items : [];",
+              "const dupe = new Set(items.map(i => i.item_code)).size < items.length;",
+              "pm.test(\"payload does reuse an item_code (that is the bug)\",",
+              "    () => pm.expect(dupe).to.be.true);",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Create invoice (legacy key names)",
       "request": {
         "method": "POST",
         "header": [
@@ -558,7 +837,7 @@
       ]
     },
     {
-      "name": "07 Idempotency check (re-send same id)",
+      "name": "11 Idempotency check (re-send same id)",
       "request": {
         "method": "POST",
         "header": [
@@ -622,7 +901,7 @@
       ]
     },
     {
-      "name": "08 Create credit note",
+      "name": "12 Create credit note",
       "request": {
         "method": "POST",
         "header": [
@@ -687,7 +966,7 @@
       ]
     },
     {
-      "name": "09 Create draft only (submit=false)",
+      "name": "13 Create draft only (submit=false)",
       "request": {
         "method": "POST",
         "header": [
@@ -752,7 +1031,7 @@
       ]
     },
     {
-      "name": "10 Submit the draft",
+      "name": "14 Submit the draft",
       "request": {
         "method": "POST",
         "header": [
@@ -815,7 +1094,7 @@
       ]
     },
     {
-      "name": "11 Get invoice",
+      "name": "15 Get invoice",
       "request": {
         "method": "GET",
         "header": [
@@ -871,7 +1150,67 @@
       ]
     },
     {
-      "name": "12 Get ZATCA status (poll this)",
+      "name": "16 Get invoice with the signed XML (verify the VAT breakdown, include_xml=1)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "token {{api_key}}:{{api_secret}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.get_invoice?invoice={{last_invoice}}&include_xml=1",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.get_invoice"
+          ],
+          "query": [
+            {
+              "key": "invoice",
+              "value": "{{last_invoice}}"
+            },
+            {
+              "key": "include_xml",
+              "value": "1"
+            }
+          ]
+        },
+        "description": "Returns `data.zatca.signed_xml`: the exact UBL document sent to ZATCA. Search it for `cac:TaxSubtotal` to see one block per VAT category, each with its `TaxableAmount`, `TaxAmount`, `Percent` and \u2014 for zero-rated and exempt lines \u2014 a `TaxExemptionReasonCode` such as `VATEX-SA-32`. This is how you prove a mixed-rate invoice was split correctly rather than trusting the totals."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const body = pm.response.json();",
+              "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+              "const env = body.message;",
+              "pm.test(\"success = true\", () => pm.expect(env.success, JSON.stringify(env.errors)).to.be.true);",
+              "pm.test(\"no errors\", () => pm.expect(env.errors).to.be.an(\"array\").that.is.empty);",
+              "const data = env.data;",
+              "pm.test(\"signed XML returned\", () => pm.expect(data.zatca.signed_xml).to.be.a(\"string\"));",
+              "const xml = data.zatca.signed_xml;",
+              "const subtotals = (xml.match(/<cac:TaxSubtotal>/g) || []).length;",
+              "console.log(\"VAT categories in the filing:\", subtotals);",
+              "pm.test(\"at least one VAT category\", () => pm.expect(subtotals).to.be.above(0));",
+              ""
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "17 Get ZATCA status (poll this)",
       "request": {
         "method": "GET",
         "header": [
@@ -928,7 +1267,7 @@
       ]
     },
     {
-      "name": "13 List invoices",
+      "name": "18 List invoices",
       "request": {
         "method": "GET",
         "header": [
@@ -1001,7 +1340,7 @@
       ]
     },
     {
-      "name": "14 List only ZATCA-rejected invoices",
+      "name": "19 List only ZATCA-rejected invoices",
       "request": {
         "method": "GET",
         "header": [
@@ -1069,7 +1408,7 @@
       ]
     },
     {
-      "name": "15 Resubmit to ZATCA",
+      "name": "20 Resubmit to ZATCA",
       "request": {
         "method": "POST",
         "header": [
@@ -1131,7 +1470,7 @@
       ]
     },
     {
-      "name": "16 Trigger a pull source",
+      "name": "21 Trigger a pull source",
       "request": {
         "method": "POST",
         "header": [
@@ -1193,7 +1532,7 @@
       ]
     },
     {
-      "name": "17 Error: missing required fields",
+      "name": "22 Error: missing required fields",
       "request": {
         "method": "POST",
         "header": [
@@ -1252,7 +1591,7 @@
       ]
     },
     {
-      "name": "18 Error: unknown invoice",
+      "name": "23 Error: unknown invoice",
       "request": {
         "method": "GET",
         "header": [

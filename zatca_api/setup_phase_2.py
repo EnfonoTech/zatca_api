@@ -155,13 +155,14 @@ def _ensure_tax_categories() -> dict:
     code: S standard, E exempt, Z zero-rated, O outside scope. Anything other than
     'Standard rate' is stored as ``"<category> || <reason>"``, and the reason half must
     match ksa_compliance's own list exactly -- it resolves to a VATEX-SA-* code and its
-    Arabic text. 'Export of goods' is used for the zero-rated template here.
+    Arabic text. The per-template mapping lives in
+    :data:`zatca_api.setup_test_site.ITEM_TAX_TEMPLATES`, which is the single place it is
+    declared; anything not in there is reported for manual mapping rather than guessed.
 
     Tax Category records are setup-wizard fixtures, so a fresh site has none.
     """
 
     standard = 'Standard rate'
-    zero_rated = 'Zero rated goods || Export of goods'
     created = {}
 
     meta = frappe.get_meta('Tax Category')
@@ -186,13 +187,22 @@ def _ensure_tax_categories() -> dict:
             frappe.db.set_value('Sales Taxes and Charges Template', name, 'tax_category', 'Standard')
             created.setdefault('templates', []).append(name)
 
-    # Item Tax Templates carry their own per-line category.
+    # Item Tax Templates carry their own per-line category. Backfill from the seeder's
+    # explicit table rather than guessing from the name: an unrecognised template stamped
+    # 'Standard rate' would file zero-rated or exempt lines as standard -- right arithmetic,
+    # wrong VAT category, and ZATCA accepts it, so nothing would ever surface the mistake.
     item_meta = frappe.get_meta('Item Tax Template')
     if item_meta.get_field('custom_zatca_item_tax_category'):
+        from zatca_api.setup_test_site import ITEM_TAX_TEMPLATES
+
+        known = {f'{title} - {ABBR}': category for title, (_, category) in ITEM_TAX_TEMPLATES.items()}
         for name in frappe.get_all('Item Tax Template', filters={'company': COMPANY}, pluck='name'):
             if frappe.db.get_value('Item Tax Template', name, 'custom_zatca_item_tax_category'):
                 continue
-            category = zero_rated if 'Zero' in name else standard
+            category = known.get(name)
+            if not category:
+                created.setdefault('needs_manual_category', []).append(name)
+                continue
             frappe.db.set_value('Item Tax Template', name, 'custom_zatca_item_tax_category', category)
             created.setdefault('item_tax_templates', []).append(f'{name} -> {category}')
 
