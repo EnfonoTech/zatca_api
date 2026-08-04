@@ -40,6 +40,19 @@ from zatca_api.setup_test_site import ABBR, COMPANY, SELLER_VAT
 SANDBOX_OTP = '123456'
 SANDBOX = 'Sandbox'
 
+# ZATCA's sandbox hands back a FIXED certificate issued to its own test taxpayer, then
+# refuses any invoice whose seller VAT differs from it:
+#   errorMessages: certificate-permissions
+#   'User only allowed to use the vat number that exists in the authentication certificate'
+# Decoded from the certificate ZATCA actually returned:
+#   subject = C=SA, O=Maximum Speed Tech Supply LTD, OU=Riyadh Branch,
+#             CN=TST-886431145-399999999900003
+#   UID     = 399999999900003
+# So on sandbox the seller identity is ZATCA's, not the client's. Simulation and
+# Production use the real taxpayer's own VAT.
+SANDBOX_VAT = '399999999900003'
+SANDBOX_CRN = '886431145'
+
 
 def run(otp: str = SANDBOX_OTP, fatoora_server: str = SANDBOX):
     """Install the CLI if needed, create Business Settings, then onboard against sandbox."""
@@ -204,7 +217,11 @@ def _ensure_business_settings(cli: dict, fatoora_server: str) -> str:
     doc.currency = frappe.db.get_value('Company', COMPANY, 'default_currency') or 'SAR'
     doc.country = frappe.db.get_value('Company', COMPANY, 'country') or 'Saudi Arabia'
     doc.seller_name = COMPANY
-    doc.vat_registration_number = SELLER_VAT
+    # On sandbox the VAT must match ZATCA's fixed certificate, or every invoice comes
+    # back rejected with certificate-permissions.
+    is_sandbox = fatoora_server == SANDBOX
+    seller_vat = SANDBOX_VAT if is_sandbox else SELLER_VAT
+    doc.vat_registration_number = seller_vat
 
     # These identify the EGS unit to ZATCA and both have enforced formats.
     #
@@ -213,7 +230,7 @@ def _ensure_business_settings(cli: dict, fatoora_server: str) -> str:
     # individual group member whose device is being onboarded". For a group VAT
     # registration that is the member's TIN, which is the first 10 digits of the 15-digit
     # VAT number.
-    doc.company_unit = SELLER_VAT[:10]
+    doc.company_unit = seller_vat[:10]
     # ZATCA's expected serial format: 1-<solution>|2-<model/version>|3-<serial>
     doc.company_unit_serial = f'1-Enfono|2-zatca_api|3-{ABBR}-TEST-001'
     doc.company_category = 'Services'
@@ -224,6 +241,12 @@ def _ensure_business_settings(cli: dict, fatoora_server: str) -> str:
     doc.sync_with_zatca = 'Live'
     doc.status = 'Active'
 
+    # ZATCA warns BR-KSA-08 when the seller carries no additional identifier: 'The seller
+    # identification (BT-29) must exist only once with one of the scheme ID (CRN, MOM,
+    # MLS, SAG, OTH, 700)'. A CRN satisfies it.
+    if not doc.other_ids:
+        doc.append('other_ids', {'type_name': 'CRN', 'type_code': 'CRN', 'value': SANDBOX_CRN})
+
     doc.cli_setup = 'Manual'
     doc.zatca_cli_path = cli.get('cli_path')
     doc.java_home = cli.get('jre_path')
@@ -232,6 +255,18 @@ def _ensure_business_settings(cli: dict, fatoora_server: str) -> str:
     # silent ZATCA rejection into a local error naming the failing rule.
     doc.validate_generated_xml = 1
     doc.block_invoice_on_invalid_xml = 0
+
+    # A changed seller VAT invalidates the CSR its CSID was issued against, so clear the
+    # onboarding and let it redo rather than signing with a mismatched identity.
+    previous_vat = (
+        cstr(frappe.db.get_value('ZATCA Business Settings', doc.name, 'vat_registration_number'))
+        if existing
+        else ''
+    )
+    if previous_vat and previous_vat != seller_vat:
+        doc.compliance_request_id = None
+        doc.production_request_id = None
+        doc.production_security_token = None
 
     doc.flags.ignore_permissions = True
     doc.save()
