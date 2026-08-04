@@ -336,3 +336,141 @@ def status() -> dict:
         'has_production_token': bool(doc.production_security_token),
         'phase_1_still_present': frappe.db.count('ZATCA Phase 1 Business Settings', {'company': COMPANY}),
     }
+
+
+# --------------------------------------------------------------------------- simulation
+
+SIMULATION = 'Simulation'
+
+
+def simulation_preflight(vat: str | None = None, company: str = COMPANY) -> dict:
+    """Report whether a Simulation onboarding would be able to proceed. Calls nothing.
+
+    Simulation is the stage before Production and behaves like it in every way that
+    matters, which is exactly why it cannot be faked:
+
+    * it issues a certificate against a **real taxpayer VAT** in ZATCA's registry, so a
+      placeholder number is rejected;
+    * it needs an **OTP generated in the ZATCA Fatoora portal** by someone signed in to
+      that taxpayer's account, and the OTP is short-lived;
+    * unlike sandbox it generates its **own private key** rather than using the one
+      bundled with ksa_compliance, and the CSR is built with the CLI's simulation flag,
+      which selects a different certificate template.
+
+    Run this first; it tells you what is missing without touching ZATCA.
+    """
+    checks = {}
+    settings_name = frappe.db.get_value('ZATCA Business Settings', {'company': company}, 'name')
+    checks['business_settings'] = settings_name or 'MISSING - run run() first'
+
+    if settings_name:
+        doc = frappe.get_doc('ZATCA Business Settings', settings_name)
+        checks['cli_path_ok'] = _exists(doc.zatca_cli_path)
+        checks['java_home_ok'] = _exists(doc.java_home)
+        checks['current_server'] = doc.fatoora_server
+        checks['current_vat'] = doc.vat_registration_number
+        checks['company_address'] = doc.company_address
+        checks['seller_other_ids'] = [(r.type_code, r.value) for r in doc.other_ids]
+        checks['tax_category_set'] = bool(
+            frappe.db.get_value(
+                'Sales Taxes and Charges Template', {'company': company, 'is_default': 1}, 'tax_category'
+            )
+        )
+
+    target_vat = cstr(vat or '').strip()
+    if not target_vat:
+        checks['vat'] = 'NOT SUPPLIED - Simulation needs the real taxpayer VAT'
+    else:
+        checks['vat'] = _validate_vat(target_vat, raise_on_error=False)
+
+    checks['otp'] = 'must be generated in the ZATCA Fatoora portal at run time'
+    checks['simulation_url'] = 'https://gw-fatoora.zatca.gov.sa/e-invoicing/simulation/'
+    checks['ready'] = bool(
+        settings_name
+        and checks.get('cli_path_ok')
+        and checks.get('java_home_ok')
+        and target_vat
+        and checks.get('vat') == 'ok'
+    )
+
+    print('=' * 70)
+    print('Simulation preflight')
+    print('=' * 70)
+    for key, value in checks.items():
+        print(f'  {key:22s} {value}')
+    print('=' * 70)
+    if not checks['ready']:
+        print('NOT READY. Fix the above, then run:')
+        print('  from zatca_api.setup_phase_2 import simulation')
+        print("  simulation(vat='<real 15-digit VAT>', otp='<OTP from Fatoora portal>')")
+    return checks
+
+
+def _validate_vat(vat: str, raise_on_error: bool = True) -> str:
+    """ZATCA VAT numbers are 15 digits starting and ending with 3."""
+    problems = []
+    if not vat.isdigit() or len(vat) != 15:
+        problems.append('must be exactly 15 digits')
+    elif not (vat.startswith('3') and vat.endswith('3')):
+        problems.append('must start and end with 3')
+    if vat in (SANDBOX_VAT, SELLER_VAT):
+        problems.append(
+            'this is a test/placeholder VAT; Simulation issues a certificate against a '
+            'real taxpayer and will reject it'
+        )
+
+    if not problems:
+        return 'ok'
+    message = f'Invalid VAT {vat!r}: ' + '; '.join(problems)
+    if raise_on_error:
+        frappe.throw(message)
+    return message
+
+
+def simulation(vat: str, otp: str, company: str = COMPANY) -> dict:
+    """Onboard the company against ZATCA's **Simulation** environment.
+
+    ``vat`` is the real taxpayer VAT registration number. ``otp`` is generated in the
+    ZATCA Fatoora portal, under the taxpayer's own account, and expires quickly -- so it
+    has to be passed in at the moment of running, never stored.
+
+    Switching a company from Sandbox to Simulation invalidates the sandbox CSID, because
+    the certificate is issued for a different environment and a different identity. The
+    onboarding fields are therefore cleared and reissued.
+    """
+    _validate_vat(cstr(vat).strip())
+    if not cstr(otp).strip():
+        frappe.throw(
+            'An OTP is required. Generate it in the ZATCA Fatoora portal for this '
+            'taxpayer, then pass it in immediately -- it is short-lived.'
+        )
+
+    settings_name = frappe.db.get_value('ZATCA Business Settings', {'company': company}, 'name')
+    if not settings_name:
+        frappe.throw(f'No ZATCA Business Settings for {company}; run zatca_api.setup_phase_2.run first.')
+
+    doc = frappe.get_doc('ZATCA Business Settings', settings_name)
+    previous = {'server': doc.fatoora_server, 'vat': doc.vat_registration_number}
+
+    doc.fatoora_server = SIMULATION
+    doc.vat_registration_number = cstr(vat).strip()
+    doc.company_unit = cstr(vat).strip()[:10]
+    # The sandbox CSID was issued for a different environment and identity.
+    doc.compliance_request_id = None
+    doc.production_request_id = None
+    doc.production_security_token = None
+    doc.flags.ignore_permissions = True
+    doc.save()
+    frappe.db.commit()
+
+    result = {'previous': previous, 'now': {'server': SIMULATION, 'vat': doc.vat_registration_number}}
+    result['onboarding'] = _onboard(settings_name, otp)
+    frappe.db.commit()
+
+    print('=' * 70)
+    print('Simulation onboarding')
+    print('=' * 70)
+    for key, value in result.items():
+        print(f'  {key:14s} {value}')
+    print('=' * 70)
+    return result
