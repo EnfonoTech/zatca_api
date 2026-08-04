@@ -99,6 +99,13 @@ simplified.
 }
 ```
 
+> **This is enforced.** If you send a buyer VAT number (or another buyer identifier)
+> and the address is incomplete, the request is **rejected** with a per-field list —
+> nothing is created. That mirrors `ksa_compliance`, which validates the buyer address
+> whenever the invoice type is *Standard* and refuses outright when a B2B customer has
+> no address at all. Better you get a precise error than ZATCA rejecting the filing
+> later.
+
 ZATCA's exact rules, which it enforces and will reject on:
 
 | Field | Rule |
@@ -315,6 +322,7 @@ An empty `payloads` array is a valid response and means nothing new.
 |---|---|
 | `external_id` not stable across retries | Duplicate invoices |
 | B2B buyer sent without `tax_id` | Filed as *simplified* — compliance defect, no error shown |
+| B2B buyer with an incomplete address | **Request rejected.** Send all five address fields |
 | `building_number` as `521` not `"0521"` | ZATCA rejects the invoice |
 | `postal_code` as a number, leading zero lost | ZATCA rejects the invoice |
 | `rate` sent **including** VAT | Totals overstated by 15% |
@@ -350,7 +358,7 @@ Full API reference: [`USER_GUIDE.md`](USER_GUIDE.md).
 
 - [ ] `external_id` is our document number and never changes on retry
 - [ ] Every business buyer sends `tax_id` (or `buyer_id_type` + `buyer_id_value`)
-- [ ] Buyer address sends street, building number (4 digits), district, city, postal code (5 digits)
+- [ ] Buyer address sends street, building number (4 digits), district, city, postal code (5 digits) — **mandatory for every B2B invoice; the request is rejected without them**
 - [ ] `building_number` and `postal_code` are strings
 - [ ] `rate` excludes VAT
 - [ ] Mixed VAT rates send `item_tax_template` per line

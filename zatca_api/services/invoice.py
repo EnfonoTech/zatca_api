@@ -341,6 +341,7 @@ def build_invoice(payload: dict, settings) -> tuple:
     customer = masters.ensure_customer(payload, settings)
     address_result = masters.ensure_address(payload, customer, settings)
     warnings = list(address_result['warnings'])
+    payload['_is_b2b'] = address_result.get('is_b2b')
 
     existing = find_by_external_id(payload['external_id'], lock=True)
 

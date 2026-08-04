@@ -238,8 +238,22 @@ class TestDryRunZatcaClassification(ZATCAAPITestCase):
     def test_buyer_with_vat_number_is_standard(self):
         self._with_phase_2()
         response = v1.validate_payload(
-            **_payload('DRY-Z-001', customer='_ZAPI B2B Dry', tax_id='300000000000003')
+            **_payload(
+                'DRY-Z-001',
+                customer='_ZAPI B2B Dry',
+                tax_id='300000000000003',
+                address_title='_ZAPI B2B Dry Billing',
+                address_parts={
+                    'street': 'Olaya Street',
+                    'building_number': '4521',
+                    'district': 'Al Murabba',
+                    'city': 'Riyadh',
+                    'postal_code': '12613',
+                    'country': 'Saudi Arabia',
+                },
+            )
         )
+        self.assertTrue(response['data']['valid'], msg=response['data']['errors'])
         block = response['data']['zatca']
         self.assertEqual(block['invoice_type'], 'Standard')
         self.assertTrue(block['buyer_is_b2b'])
@@ -260,16 +274,30 @@ class TestDryRunZatcaClassification(ZATCAAPITestCase):
         self.assertEqual(block['invoice_type'], 'Standard')
         self.assertIn('Standard Tax Invoices', block['reason'])
 
-    def test_standard_invoice_with_incomplete_address_is_flagged_as_blocking(self):
-        """The whole point: tell them ZATCA will reject this, before it does."""
+    def test_b2b_with_incomplete_address_is_a_hard_error_not_just_a_flag(self):
+        """Incomplete B2B address is now rejected outright, before anything is written.
+
+        It used to surface only as zatca_readiness.blocking. ksa_compliance validates
+        the buyer address whenever the invoice type is Standard and throws, so there is
+        no value in letting the invoice get as far as submission.
+        """
         self._with_phase_2(mode='Standard Tax Invoices')
         response = v1.validate_payload(
             **_payload('DRY-Z-004', customer='_ZAPI B2B Dry3', tax_id='300000000000003')
         )
+        data = response['data']
+        self.assertFalse(data['valid'])
+        self.assertIn('mandatory for a B2B customer', data['errors'][0]['message'])
+
+    def test_standard_mode_with_a_buyer_that_has_no_identifier_is_blocking(self):
+        """Company forced to Standard, buyer has nothing to identify them by."""
+        self._with_phase_2(mode='Standard Tax Invoices')
+        response = v1.validate_payload(**_payload('DRY-Z-004B', customer='_ZAPI B2C Forced'))
         readiness = response['data']['zatca_readiness']
         self.assertEqual(readiness['invoice_type'], 'Standard')
+        self.assertFalse(readiness['buyer_is_b2b'])
         self.assertTrue(readiness['would_be_rejected_by_zatca'])
-        self.assertTrue(readiness['blocking'])
+        self.assertTrue(any('identifier' in b for b in readiness['blocking']))
 
     def test_simplified_invoice_treats_address_gaps_as_advisory(self):
         self._with_phase_2(mode='Simplified Tax Invoices')

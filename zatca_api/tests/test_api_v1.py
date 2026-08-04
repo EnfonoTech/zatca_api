@@ -125,6 +125,7 @@ def _configure_settings(**overrides):
     settings.auto_submit_invoices = 0  # keep tests fast and independent of ZATCA setup
     settings.submit_mode = 'Immediate'
     settings.update_existing_drafts = 1
+    settings.enforce_b2b_address = 1
     settings.log_requests = 0
     settings.wait_for_zatca_seconds = 0
     settings.field_mappings = []
@@ -614,13 +615,25 @@ class TestMasterDataCreation(ZATCAAPITestCase):
         if not frappe.get_meta('Customer').get_field('custom_vat_registration_number'):
             self.skipTest('ksa_compliance is not installed on this site.')
 
-        v1.create_invoice(
+        # A complete buyer address is mandatory for a B2B customer, so it must be
+        # supplied here -- see tests/test_b2b_address.py.
+        response = v1.create_invoice(
             **_payload(
                 'ZAPI-MASTER-VAT',
                 customer='_ZAPI B2B Customer',
                 tax_id='300000000000003',
+                address_title='_ZAPI B2B Customer Billing',
+                address_parts={
+                    'street': 'Olaya Street',
+                    'building_number': '4521',
+                    'district': 'Al Murabba',
+                    'city': 'Riyadh',
+                    'postal_code': '12613',
+                    'country': 'Saudi Arabia',
+                },
             )
         )
+        self.assertTrue(response['success'], msg=response.get('errors'))
         customer = frappe.get_doc('Customer', '_ZAPI B2B Customer')
         self.assertEqual(customer.tax_id, '300000000000003')
         self.assertEqual(customer.custom_vat_registration_number, '300000000000003')

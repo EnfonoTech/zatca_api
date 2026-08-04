@@ -28,6 +28,7 @@
   "default_item_group",
   "default_uom",
   "section_address",
+  "enforce_b2b_address",
   "default_country",
   "parse_address_display",
   "column_break_address",
@@ -91,7 +92,7 @@
   },
   {
    "default": "1",
-   "description": "Submit the Sales Invoice after creating it. <b>A ZATCA QR only exists for submitted invoices</b> — leaving invoices in Draft means no QR is returned.",
+   "description": "Submit the Sales Invoice after creating it. <b>A ZATCA QR only exists for submitted invoices</b> \u2014 leaving invoices in Draft means no QR is returned.",
    "fieldname": "auto_submit_invoices",
    "fieldtype": "Check",
    "label": "Auto Submit Invoices"
@@ -229,7 +230,7 @@
   },
   {
    "default": "Auto",
-   "description": "<b>Auto</b> returns Phase 2 data when ZATCA Business Settings exist for the company, otherwise falls back to Phase 1. All cryptography is performed by the <code>ksa_compliance</code> app — this app never signs or hashes anything itself.",
+   "description": "<b>Auto</b> returns Phase 2 data when ZATCA Business Settings exist for the company, otherwise falls back to Phase 1. All cryptography is performed by the <code>ksa_compliance</code> app \u2014 this app never signs or hashes anything itself.",
    "fieldname": "zatca_phase",
    "fieldtype": "Select",
    "label": "Phase Resolution",
@@ -248,7 +249,7 @@
   },
   {
    "default": "0",
-   "description": "Include the full signed UBL XML in responses. Off by default — it adds roughly 30-60 KB per invoice.",
+   "description": "Include the full signed UBL XML in responses. Off by default \u2014 it adds roughly 30-60 KB per invoice.",
    "fieldname": "include_signed_xml",
    "fieldtype": "Check",
    "label": "Include Signed XML"
@@ -374,6 +375,13 @@
    "fieldname": "log_retention_days",
    "fieldtype": "Int",
    "label": "Log Retention (days)"
+  },
+  {
+   "default": "1",
+   "description": "Reject an invoice for a B2B buyer (one with a VAT registration number or another ZATCA identifier) whose address is missing street, building number (4 digits), district, city or postal code (5 digits).<br><br>On by default and should stay on: <code>ksa_compliance</code> validates the buyer address whenever the invoice type is <b>Standard</b> and ZATCA rejects a standard invoice without a complete one. Enforcing it here means the caller gets a precise per-field error before any document is created, instead of a rendered message at submission. Turn off only on a non-KSA site, or while migrating legacy customers with incomplete addresses.",
+   "fieldname": "enforce_b2b_address",
+   "fieldtype": "Check",
+   "label": "Require Complete Address For B2B"
   }
  ],
  "index_web_pages_for_search": 1,

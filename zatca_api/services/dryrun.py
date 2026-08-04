@@ -164,22 +164,30 @@ def _zatca_readiness(report: dict, payload: dict) -> dict:
     a *standard* invoice. Splitting the two makes the vendor's next action obvious.
     """
     invoice_type = (report.get('zatca') or {}).get('invoice_type')
+    is_b2b = bool(payload.get('_is_b2b'))
     blocking = []
     advisory = []
 
     address_warnings = [w for w in report['warnings'] if 'Buyer address' in w or 'Buyer postal' in w]
-    if invoice_type == 'Standard':
+
+    # A B2B buyer with an incomplete address is now rejected outright by
+    # masters.ensure_address, so it arrives here as an error rather than a warning.
+    # These lists cover what remains: the company forcing Standard mode on a buyer with
+    # no identifier, and the advisory case where the invoice is simplified.
+    if invoice_type == 'Standard' and not is_b2b:
+        blocking.append(
+            'The company is configured for Standard Tax Invoices, but this buyer has no '
+            'identifier. Send tax_id, or buyer_id_type + buyer_id_value.'
+        )
         blocking.extend(address_warnings)
-        if not payload.get('tax_id') and not payload.get('buyer_id_value'):
-            blocking.append(
-                'A standard invoice needs a buyer identifier: send tax_id, or '
-                'buyer_id_type + buyer_id_value.'
-            )
+    elif invoice_type == 'Standard':
+        blocking.extend(address_warnings)
     else:
         advisory.extend(address_warnings)
 
     return {
         'invoice_type': invoice_type,
+        'buyer_is_b2b': is_b2b,
         'would_be_rejected_by_zatca': bool(blocking),
         'blocking': blocking,
         'advisory': advisory,

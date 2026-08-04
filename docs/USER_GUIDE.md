@@ -104,6 +104,7 @@ The settings you will actually care about:
 | **Allow Modifying Submitted Invoices** | off | Leave off. Re-posting a submitted invoice rewrites GL entries, and a cleared invoice is legally immutable. |
 | **Create Missing Customers / Items** | on | Auto-create master data from the payload. |
 | **Create Missing UOMs / Projects** | off | Off by default: a typo would otherwise pollute the master tables permanently. |
+| **Require Complete Address For B2B** | **on** | Reject an invoice for a buyer with a VAT number or other ZATCA identifier whose address is missing street, building number (4 digits), district, city or postal code (5 digits). Mirrors `ksa_compliance`, which validates the buyer address whenever the invoice type is *Standard*. Turn off only on a non-KSA site or during a legacy migration. |
 | **Parse Free-Text Address** | off | Turn on when the source system sends one concatenated address line — see §10. |
 | **Phase Resolution** | Auto | `Auto` returns Phase 2 when the company has active ZATCA Business Settings, else falls back to Phase 1. |
 | **Include QR PNG** | on | Off keeps responses small when the caller renders the QR itself. |
@@ -581,7 +582,24 @@ Work through this before going live. `ping` reports items 1–3.
    (4 digits), district, city, postal code (5 digits). Send `address_parts`, or
    enable *Parse Free-Text Address* and send `address_display`.
 
-   Anything missing comes back in `warnings` before ZATCA rejects it:
+   **This is enforced as an error for a B2B buyer**, before any document is created:
+
+   ```json
+   {
+     "code": "validation_error",
+     "message": "A complete buyer address is mandatory for a B2B customer, because ZATCA rejects a standard invoice without one. Problems: ...",
+     "details": { "field": "address_parts", "is_b2b": true, "problems": ["..."],
+                  "required": ["street", "building_number (4 digits)", "district", "city", "postal_code (5 digits)"] }
+   }
+   ```
+
+   The rule comes from `ksa_compliance`: `_set_buyer_details` passes `validate=True`
+   to `_set_buyer_address` whenever the invoice type is *Standard*, and throws
+   outright when a B2B customer has no address at all. Enforcing it here means a
+   precise per-field error instead of a rendered message at submission.
+
+   For a **B2C** buyer the same gaps stay warnings — a simplified invoice needs no
+   buyer address:
 
    ```json
    "warnings": [

@@ -4,3 +4,4 @@
 [post_model_sync]
 # Patches executed after doctypes are migrated
 zatca_api.patches.v1_0.seed_default_settings
+zatca_api.patches.v1_1.enable_b2b_address_enforcement

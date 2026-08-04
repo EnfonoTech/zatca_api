@@ -247,14 +247,64 @@ def _set_zatca_customer_ids(doc, payload: dict) -> bool:
     return changed
 
 
+def customer_is_b2b(payload: dict, customer: str | None = None) -> bool:
+    """Is this a B2B buyer, i.e. will the invoice be a ZATCA *standard* invoice?
+
+    Checks the incoming payload first, then the saved Customer. Both matter: on the
+    first invoice for a new customer the identifier only exists in the payload, and on
+    a repeat invoice the payload may omit it because the Customer already carries it.
+
+    The saved-customer check delegates to `ksa_compliance.is_b2b_customer`, which reads
+    ``custom_vat_registration_number`` or a non-empty ``custom_additional_ids`` row --
+    NOT the core ``tax_id`` field. Delegating means this cannot drift from the rule
+    that actually decides standard vs simplified at submission.
+    """
+    if cstr(payload.get('tax_id')).strip() or cstr(payload.get('buyer_id_value')).strip():
+        return True
+
+    if not customer or not frappe.db.exists('Customer', customer):
+        return False
+
+    try:
+        from ksa_compliance.ksa_compliance.doctype.sales_invoice_additional_fields.sales_invoice_additional_fields import (
+            is_b2b_customer,
+        )
+    except ImportError:
+        # Without ksa_compliance there is no standard/simplified distinction, so fall
+        # back to reading the same fields it would.
+        meta = frappe.get_meta('Customer')
+        if not meta.get_field('custom_vat_registration_number'):
+            return False
+        doc = frappe.get_doc('Customer', customer)
+        return bool(
+            cstr(doc.get('custom_vat_registration_number')).strip()
+            or any(cstr(row.get('value')).strip() for row in doc.get('custom_additional_ids') or [])
+        )
+
+    return bool(is_b2b_customer(frappe.get_doc('Customer', customer)))
+
+
 def ensure_address(payload: dict, customer: str, settings) -> dict:
     """Create or update the buyer Address and link it to the Customer.
 
-    Returns ``{"address": name|None, "warnings": [...]}``. Address problems are
-    warnings, not errors: `ksa_compliance` is the authority on what ZATCA rejects
-    and raises its own error at submission. Duplicating that rule here would mean
-    two places to keep in sync.
+    Returns ``{"address": name|None, "warnings": [...], "is_b2b": bool}``.
+
+    **A complete address is mandatory for a B2B buyer** and is enforced here, as an
+    error, before anything is written. That mirrors `ksa_compliance`, which passes
+    ``validate=True`` to ``_set_buyer_address`` whenever the invoice type is
+    *Standard* and throws outright when a B2B customer has no address at all.
+
+    Enforcing it here rather than letting that fire at submission buys three things:
+    the caller gets a precise per-field list instead of a rendered HTML message, the
+    failure happens before any document exists, and the same verdict is available in
+    the dry run on a site where ZATCA settings are not configured yet.
+
+    For a B2C buyer the same gaps stay warnings -- ZATCA does not require a buyer
+    address on a simplified invoice.
     """
+    is_b2b = customer_is_b2b(payload, customer)
+    enforce = is_b2b and cint(settings.enforce_b2b_address)
+
     parts = dict(payload.get('address') or {})
 
     # Free-text parsing fills only the gaps; explicit payload values always win.
@@ -270,8 +320,41 @@ def ensure_address(payload: dict, customer: str, settings) -> dict:
     parts = normalise_address_parts(parts)
     warnings = address_warnings(parts, country)
 
+    if enforce and warnings:
+        raise PayloadError(
+            _(
+                'A complete buyer address is mandatory for a B2B customer, because ZATCA '
+                'rejects a standard invoice without one. Problems: {0}'
+            ).format(' '.join(warnings)),
+            {
+                'field': 'address_parts',
+                'customer': customer,
+                'is_b2b': True,
+                'problems': warnings,
+                'required': [
+                    'street',
+                    'building_number (4 digits)',
+                    'district',
+                    'city',
+                    'postal_code (5 digits)',
+                ],
+            },
+        )
+
     if not parts and not payload.get('address_title'):
-        return {'address': None, 'warnings': warnings}
+        return {'address': None, 'warnings': warnings, 'is_b2b': is_b2b}
+
+    # Address.address_line1, city and country are all reqd in core frappe. Creating a
+    # record from a title alone therefore fails ERPNext validation with a bare
+    # "[Address, X]: city", which tells the caller nothing. When the payload does not
+    # carry enough to build a valid address, skip it and report the gaps instead --
+    # a B2C invoice does not need a buyer address at all. (A B2B invoice has already
+    # been rejected above when enforcement is on.)
+    if not parts.get('city'):
+        warnings.append(
+            'No buyer Address was created: city is mandatory on an Address record and was ' 'not supplied.'
+        )
+        return {'address': None, 'warnings': warnings, 'is_b2b': is_b2b}
 
     title = cstr(payload.get('address_title')).strip() or customer
     existing = _find_linked_address(title, customer)
@@ -279,7 +362,7 @@ def ensure_address(payload: dict, customer: str, settings) -> dict:
     if existing:
         _update_address(existing, parts, country, email_id, phone, settings, payload)
         _set_primary_address(customer, existing)
-        return {'address': existing, 'warnings': warnings}
+        return {'address': existing, 'warnings': warnings, 'is_b2b': is_b2b}
 
     doc = frappe.new_doc('Address')
     doc.address_title = title
@@ -303,7 +386,7 @@ def ensure_address(payload: dict, customer: str, settings) -> dict:
     doc.insert(ignore_permissions=True)
     _set_primary_address(customer, doc.name)
 
-    return {'address': doc.name, 'warnings': warnings}
+    return {'address': doc.name, 'warnings': warnings, 'is_b2b': is_b2b}
 
 
 def _find_linked_address(title: str, customer: str) -> str | None:

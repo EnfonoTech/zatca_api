@@ -528,8 +528,21 @@ and <code>CUSTOMER_NAME</code> all resolve. Aliases are listed in parentheses.</
         <code>email</code>, <code>phone</code></td><td></td><td>Optional</td></tr>
 </tbody></table></div>
 <p>Short numeric building numbers and postal codes are zero-padded automatically
-(<code>521</code> &rarr; <code>0521</code>). Over-long values are left alone so
-<code>ksa_compliance</code> reports the real problem against the Address record.</p>
+(<code>521</code> &rarr; <code>0521</code>). Over-long or non-numeric values cannot be
+salvaged and are rejected.</p>
+<div class="danger">
+<p><strong>Mandatory for B2B.</strong> If the buyer has a VAT registration number or
+another ZATCA identifier, an incomplete address is an <strong>error</strong>, not a
+warning &mdash; the request is rejected with a per-field list and nothing is created.</p>
+<p>The rule comes from <code>ksa_compliance</code>:
+<code>_set_buyer_details</code> passes <code>validate=True</code> to
+<code>_set_buyer_address</code> whenever the invoice type is <em>Standard</em>, and
+throws outright when a B2B customer has no address at all. Catching it here gives the
+caller a precise message before any document exists.</p>
+<p>For a B2C buyer the same gaps stay warnings &mdash; a simplified invoice needs no
+buyer address. Relax the behaviour with <em>Require Complete Address For B2B</em> only
+on a non-KSA site or during a legacy migration.</p>
+</div>
 </section>
 
 <section id="tax">
