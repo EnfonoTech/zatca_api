@@ -114,7 +114,7 @@ def _ensure_erpnext_masters() -> dict:
     try:
         install_fixtures.install(country)
         frappe.db.commit()
-    except Exception as exc:  # noqa: BLE001 - report and fall back rather than abort
+    except Exception as exc:
         frappe.db.rollback()
         return _minimal_masters_fallback(f'install_fixtures.install failed: {exc}')
     finally:
