@@ -439,18 +439,34 @@ def _ensure_fiscal_year() -> dict:
             doc.flags.ignore_permissions = True
             doc.save()
             frappe.db.commit()
-            return {'fiscal_year': year, 'status': 'company linked to existing year'}
+            return {
+                'fiscal_year': year,
+                'status': 'company linked to existing year',
+                'warning': (
+                    'That year is restricted to named companies, so any other company '
+                    'on this site has no Fiscal Year. `bench run-tests` fails on submit '
+                    'for its own fixture company until the restriction is removed.'
+                ),
+            }
         return {'fiscal_year': year, 'status': 'already linked'}
 
     doc = frappe.new_doc('Fiscal Year')
     doc.year = year
     doc.year_start_date = f'{year}-01-01'
     doc.year_end_date = f'{year}-12-31'
-    doc.append('companies', {'company': COMPANY})
+    # Deliberately left unrestricted (no `companies` rows). A Fiscal Year that names
+    # companies applies to those only -- which silently breaks every *other* company on
+    # the site, including the throwaway company FrappeTestCase creates for the suite.
+    # Submits then fail with "Date ... is not in any active Fiscal Year".
     doc.flags.ignore_permissions = True
     doc.insert()
     frappe.db.commit()
-    return {'fiscal_year': doc.name, 'status': 'created', 'range': f'{year}-01-01..{year}-12-31'}
+    return {
+        'fiscal_year': doc.name,
+        'status': 'created',
+        'range': f'{year}-01-01..{year}-12-31',
+        'scope': 'all companies (unrestricted)',
+    }
 
 
 def _ensure_vat_account() -> str:
