@@ -132,8 +132,15 @@ def _ensure_business_settings(cli: dict, fatoora_server: str) -> str:
     doc.seller_name = COMPANY
     doc.vat_registration_number = SELLER_VAT
 
-    # Required by the doctype; these identify the EGS unit to ZATCA.
-    doc.company_unit = f'{COMPANY} HQ'
+    # These identify the EGS unit to ZATCA and both have enforced formats.
+    #
+    # company_unit becomes the CSR's Organization Unit (OU). The ZATCA CLI rejects a
+    # free-text name with: "Organization Unit Name must be the 10-digit TIN number of the
+    # individual group member whose device is being onboarded". For a group VAT
+    # registration that is the member's TIN, which is the first 10 digits of the 15-digit
+    # VAT number.
+    doc.company_unit = SELLER_VAT[:10]
+    # ZATCA's expected serial format: 1-<solution>|2-<model/version>|3-<serial>
     doc.company_unit_serial = f'1-Enfono|2-zatca_api|3-{ABBR}-TEST-001'
     doc.company_category = 'Services'
 
