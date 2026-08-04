@@ -566,34 +566,65 @@ Phase 2 site. Build for both: read <code>zatca.phase</code> and branch.</p>
 <tr><td><code>additional_fields_doc</code></td><td>absent</td><td>our internal ZATCA record, for support</td></tr>
 </tbody></table></div>
 
-<h3>The Phase 2 zatca block</h3>
+<h3>The Phase 2 zatca block &mdash; real capture</h3>
+<p>This is the actual <code>zatca</code> block returned by <code>create_invoice</code>
+on a Phase 2 site onboarded against <strong>ZATCA’s sandbox</strong>, for the same B2B
+payload shown earlier:</p>
 <pre><code>{
   &quot;available&quot;: true,
   &quot;phase&quot;: &quot;Phase 2&quot;,
-  &quot;additional_fields_doc&quot;: &quot;ACC-SINV-2026-00007-AdditionalFields-42&quot;,
-  &quot;uuid&quot;: &quot;3f2504e0-4f89-11d3-9a0c-0305e82c3301&quot;,
-  &quot;invoice_counter&quot;: 42,
-  &quot;invoice_hash&quot;: &quot;NWZlY2ViNjZmZmM4NmYzOGQ5NTI3ODZjNmQ2OTZjNzk=&quot;,
-  &quot;previous_invoice_hash&quot;: &quot;MmRlYTRhNzc4NzYzYTIzNzk0MzRkZTUxNzY0YmY4ODc=&quot;,
-  &quot;qr_content&quot;: &quot;AQ5aQVRDQSBTZWxsZXICDzMxMTExMTExMTExMTExMwMU\u2026&quot;,
+  &quot;additional_fields_doc&quot;: &quot;ACC-SINV-2026-00010-AdditionalFields-2&quot;,
+  &quot;uuid&quot;: &quot;8a892fff-2c52-49c9-af07-08e3131f204c&quot;,
+  &quot;invoice_counter&quot;: 2,
+  &quot;invoice_hash&quot;: &quot;5LgXFBTkmaXhPFVuPIREHemfGLWtM8BMMRd38P7rfmw=&quot;,
+  &quot;previous_invoice_hash&quot;: &quot;xKIFLZpENj10gqYLiceYFKNS+T+bTFXvOO3KvhRo8q4=&quot;,
+  &quot;qr_content&quot;: &quot;AQ1aQVRDQSBUZXN0IENvAg8zOTk5OTk5OTk5MDAwMDMDEzIwMjYtMDgtMDRUMTE6MzA6MDAE\u2026&quot;,
   &quot;qr_format&quot;: &quot;base64-tlv&quot;,
-  &quot;qr_png_base64&quot;: &quot;iVBORw0KGgoAAAANSUhEUg\u2026  &lt;2104 chars of base64 PNG&gt;&quot;,
-  &quot;qr_png_data_uri&quot;: &quot;data:image/png;base64,iVBORw0KGgoAAAANSUhEUg\u2026&quot;,
-  &quot;integration_status&quot;: &quot;Accepted&quot;,
+  &quot;integration_status&quot;: &quot;Ready For Batch&quot;,
   &quot;invoice_type_transaction&quot;: &quot;0100000&quot;,
   &quot;invoice_type_code&quot;: &quot;388&quot;,
-  &quot;is_cleared&quot;: true,
-  &quot;is_pending&quot;: false
+  &quot;is_cleared&quot;: false,
+  &quot;is_pending&quot;: true,
+  &quot;qr_png_base64&quot;: &quot;iVBORw0KGgoAAAANSUhEUg\u2026  &lt;3116 chars of base64 PNG&gt;&quot;,
+  &quot;qr_png_data_uri&quot;: &quot;data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA\u2026&quot;
 }</code></pre>
 
 <div class="note">
-<p><strong>The timing is the important part.</strong> Signing happens on our server the
-moment the invoice is submitted &mdash; no network call to ZATCA is involved. So
-<code>uuid</code>, <code>invoice_hash</code>, <code>previous_invoice_hash</code> and the
-QR are <strong>all in the create response, immediately</strong>, exactly as on Phase 1.</p>
-<p>Only <code>integration_status</code> is asynchronous, because filing the invoice with
-ZATCA runs in a background job. That is the one field you call back for.</p>
+<p><strong>Read the two hashes together.</strong> This invoice’s
+<code>previous_invoice_hash</code> is
+<code>xKIFLZpENj10gqYLiceYFKNS+T+bTFXvOO3KvhRo8q4=</code>, which is exactly the
+<code>invoice_hash</code> of the invoice before it, and <code>invoice_counter</code>
+went 1 &rarr; 2. Every invoice is cryptographically chained to its predecessor.</p>
+<p>That is why a rejected invoice must be refiled through
+<code>resubmit_to_zatca</code> and never re-signed by hand: breaking the chain
+invalidates every invoice issued after it.</p>
 </div>
+
+<p>Note <code>integration_status</code> is <code>Ready For Batch</code> and
+<code>is_pending</code> is <code>true</code> here &mdash; the QR, UUID and hash are
+already final, but ZATCA has not answered yet. That is the whole reason step 4
+exists.</p>
+
+<h3>… and the same invoice a moment later</h3>
+<p>Real <code>get_status</code> response for that invoice:</p>
+<pre><code>{
+  &quot;invoice&quot;: &quot;ACC-SINV-2026-00010&quot;,
+  &quot;docstatus&quot;: 1,
+  &quot;status&quot;: &quot;Unpaid&quot;,
+  &quot;zatca&quot;: {
+    &quot;available&quot;: true,
+    &quot;phase&quot;: &quot;Phase 2&quot;,
+    &quot;uuid&quot;: &quot;8a892fff-2c52-49c9-af07-08e3131f204c&quot;,
+    &quot;integration_status&quot;: &quot;Accepted with warnings&quot;,
+    &quot;is_cleared&quot;: true,
+    &quot;is_pending&quot;: false,
+    &quot;reason&quot;: null
+  }
+}</code></pre>
+<p><code>Accepted with warnings</code> and <code>is_cleared: true</code> &mdash; ZATCA
+cleared it. <code>invoice_type_transaction: 0100000</code> in the block above confirms
+it went as a <strong>standard</strong> invoice, because the payload carried
+<code>tax_id</code>.</p>
 
 <h3>Clearance vs reporting</h3>
 <p>ZATCA treats the two invoice types differently, and this is decided by whether you
