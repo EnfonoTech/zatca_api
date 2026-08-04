@@ -1,0 +1,345 @@
+# zatca_api/setup_test_site.py
+# Copyright (c) 2026, Enfono Technologies and contributors
+"""Seed a site for ZATCA API testing.
+
+Run it with::
+
+    bench --site <site> execute zatca_api.setup_test_site.run
+
+Idempotent -- safe to re-run. It fills only what is missing, so it can also repair a
+half-provisioned site.
+
+It configures **ZATCA Phase 1**, not Phase 2, on purpose: Phase 1 computes its QR
+locally with no Java CLI and no network call to ZATCA, so a freshly seeded site
+produces a genuine, verifiable QR immediately. Phase 2 additionally needs the ZATCA
+CLI, a provisioned CSID and sandbox credentials; layer that on afterwards when you
+want to exercise clearance.
+
+Two fresh-site traps this works around, both from erpnext's after_install fixtures not
+having landed:
+
+* ``Warehouse Type`` is empty, so creating a Company throws
+  ``LinkValidationError: Could not find Warehouse Type: Transit`` while building its
+  default warehouses.
+* ``Gender`` is empty, which trips other erpnext master creation.
+"""
+
+import frappe
+from frappe.utils import cint, cstr
+
+COMPANY = 'ZATCA Test Co'
+ABBR = 'ZTC'
+# 15 digits, starts and ends with 3, as ZATCA requires.
+SELLER_VAT = '311111111111113'
+BUYER_VAT = '300000000000003'
+CUSTOMER_B2C = 'Walk-in Customer'
+ITEM_STANDARD = 'SVC-IMPL'
+ITEM_ZERO = 'SVC-EXPORT'
+API_USER = 'zatca-api@enfono.com'
+
+# erpnext ships these as fixtures; a site whose after_install did not complete has none.
+WAREHOUSE_TYPES = ('Transit',)
+GENDERS = ('Male', 'Female', 'Other', 'Prefer not to say')
+
+
+def run(with_api_keys: int = 1):
+    """Seed everything. Returns a summary dict, also printed for `bench execute`."""
+    result = {}
+
+    result['prerequisites'] = _ensure_erpnext_masters()
+    result['company'] = _ensure_company()
+    result['vat_account'] = _ensure_vat_account()
+    result['tax_template'] = _ensure_tax_template(result['vat_account'])
+    result['item_tax_templates'] = _ensure_item_tax_templates(result['vat_account'])
+    result['items'] = _ensure_items()
+    result['company_address'] = _ensure_company_address()
+    result['zatca_phase_1'] = _ensure_phase_1(result['company_address'])
+    result['customer_b2c'] = _ensure_b2c_customer()
+    result['settings'] = _configure_settings()
+
+    if cint(with_api_keys):
+        result['api'] = _ensure_api_user()
+
+    frappe.db.commit()
+
+    print('=' * 70)
+    print('ZATCA API test site seeded')
+    print('=' * 70)
+    for key, value in result.items():
+        print(f'  {key:22s} {value}')
+    print('=' * 70)
+    return result
+
+
+# --------------------------------------------------------------------------- steps
+
+
+def _ensure_erpnext_masters() -> dict:
+    """Create the erpnext master records a fresh site can be missing.
+
+    Company creation builds default warehouses, which link to Warehouse Type
+    'Transit'. On a site where erpnext's after_install fixtures did not land, that
+    record does not exist and the insert throws LinkValidationError.
+    """
+    created = {'warehouse_types': [], 'genders': []}
+
+    for name in WAREHOUSE_TYPES:
+        if not frappe.db.exists('Warehouse Type', name):
+            doc = frappe.new_doc('Warehouse Type')
+            doc.name = name
+            doc.insert(ignore_permissions=True)
+            created['warehouse_types'].append(name)
+
+    if frappe.db.exists('DocType', 'Gender'):
+        for name in GENDERS:
+            if not frappe.db.exists('Gender', name):
+                doc = frappe.new_doc('Gender')
+                doc.gender = name
+                doc.insert(ignore_permissions=True)
+                created['genders'].append(name)
+
+    return created
+
+
+def _ensure_company() -> str:
+    if frappe.db.exists('Company', COMPANY):
+        _repair_company()
+        return COMPANY
+
+    doc = frappe.new_doc('Company')
+    doc.company_name = COMPANY
+    doc.abbr = ABBR
+    doc.default_currency = 'SAR'
+    doc.country = 'Saudi Arabia'
+    doc.insert(ignore_permissions=True)
+    return doc.name
+
+
+def _repair_company() -> None:
+    """Finish a Company whose insert aborted part-way.
+
+    A Company created before Warehouse Type existed has no default warehouses. Calling
+    erpnext's own creator is better than hand-building them.
+    """
+    if frappe.db.count('Warehouse', {'company': COMPANY}):
+        return
+
+    doc = frappe.get_doc('Company', COMPANY)
+    if hasattr(doc, 'create_default_warehouses'):
+        doc.create_default_warehouses()
+        frappe.db.commit()
+
+
+def _ensure_vat_account() -> str:
+    name = f'VAT 15 - {ABBR}'
+    if frappe.db.exists('Account', name):
+        return name
+
+    parent = frappe.db.get_value(
+        'Account', {'company': COMPANY, 'account_type': 'Tax', 'is_group': 1}, 'name'
+    ) or frappe.db.get_value('Account', {'company': COMPANY, 'root_type': 'Liability', 'is_group': 1}, 'name')
+    if not parent:
+        frappe.throw(f'No liability parent account found for {COMPANY}; is its chart of accounts built?')
+
+    doc = frappe.new_doc('Account')
+    doc.account_name = 'VAT 15'
+    doc.parent_account = parent
+    doc.company = COMPANY
+    doc.account_type = 'Tax'
+    doc.tax_rate = 15
+    doc.insert(ignore_permissions=True)
+    return doc.name
+
+
+def _ensure_tax_template(vat_account: str) -> str:
+    existing = frappe.db.get_value(
+        'Sales Taxes and Charges Template', {'company': COMPANY, 'is_default': 1}, 'name'
+    )
+    if existing:
+        return existing
+
+    doc = frappe.new_doc('Sales Taxes and Charges Template')
+    doc.title = 'KSA VAT 15'
+    doc.company = COMPANY
+    doc.is_default = 1
+    doc.append(
+        'taxes',
+        {
+            'charge_type': 'On Net Total',
+            'account_head': vat_account,
+            'description': 'VAT 15%',
+            'rate': 15,
+        },
+    )
+    doc.insert(ignore_permissions=True)
+    return doc.name
+
+
+def _ensure_item_tax_templates(vat_account: str) -> list:
+    """Standard and zero-rated templates, so mixed-rate invoices can be exercised."""
+    names = []
+    for title, rate in (('KSA VAT 15', 15), ('KSA Zero Rated', 0)):
+        name = f'{title} - {ABBR}'
+        if not frappe.db.exists('Item Tax Template', name):
+            doc = frappe.new_doc('Item Tax Template')
+            doc.title = title
+            doc.company = COMPANY
+            doc.append('taxes', {'tax_type': vat_account, 'tax_rate': rate})
+            doc.insert(ignore_permissions=True)
+            name = doc.name
+        names.append(name)
+    return names
+
+
+def _ensure_items() -> list:
+    group = frappe.db.get_value('Item Group', {'is_group': 0}, 'name')
+    for code, label in ((ITEM_STANDARD, 'Implementation services'), (ITEM_ZERO, 'Export services')):
+        if frappe.db.exists('Item', code):
+            continue
+        doc = frappe.new_doc('Item')
+        doc.item_code = code
+        doc.item_name = label
+        doc.item_group = group
+        doc.stock_uom = 'Nos'
+        # Non-stock: an invoice-only integration has no inventory to draw from.
+        doc.is_stock_item = 0
+        doc.is_sales_item = 1
+        doc.insert(ignore_permissions=True)
+    return [ITEM_STANDARD, ITEM_ZERO]
+
+
+def _ensure_company_address() -> str:
+    """ZATCA Phase 1 Business Settings requires a linked Address."""
+    title = f'{COMPANY} HQ'
+    existing = frappe.db.get_value('Address', {'address_title': title}, 'name')
+    if existing:
+        return existing
+
+    doc = frappe.new_doc('Address')
+    doc.address_title = title
+    doc.address_type = 'Billing'
+    doc.address_line1 = 'Olaya Street'
+    doc.city = 'Riyadh'
+    doc.pincode = '12613'
+    doc.country = 'Saudi Arabia'
+    if doc.meta.get_field('custom_building_number'):
+        doc.custom_building_number = '4521'
+        doc.custom_area = 'Al Murabba'
+    doc.append('links', {'link_doctype': 'Company', 'link_name': COMPANY})
+    doc.insert(ignore_permissions=True)
+    return doc.name
+
+
+def _ensure_phase_1(address: str):
+    """ZATCA Phase 1 Business Settings.
+
+    `status` options are Active / Disabled (not "Enabled"), `address` is mandatory, and
+    the doctype refuses to save while Phase 2 settings exist for the same company.
+    """
+    if not frappe.db.exists('DocType', 'ZATCA Phase 1 Business Settings'):
+        return 'ksa_compliance not installed - skipped'
+
+    if frappe.db.exists('ZATCA Business Settings', {'company': COMPANY}):
+        return 'Phase 2 settings already exist for this company - Phase 1 skipped'
+
+    existing = frappe.db.get_value('ZATCA Phase 1 Business Settings', {'company': COMPANY}, 'name')
+    if existing:
+        frappe.db.set_value(
+            'ZATCA Phase 1 Business Settings',
+            existing,
+            {'status': 'Active', 'vat_registration_number': SELLER_VAT, 'address': address},
+        )
+        return existing
+
+    doc = frappe.new_doc('ZATCA Phase 1 Business Settings')
+    doc.company = COMPANY
+    doc.vat_registration_number = SELLER_VAT
+    doc.address = address
+    doc.status = 'Active'
+    field = doc.meta.get_field('type_of_transaction')
+    if field:
+        options = [o for o in (field.options or '').split('\n') if o]
+        if options:
+            doc.type_of_transaction = options[-1]
+    doc.insert(ignore_permissions=True)
+    return doc.name
+
+
+def _ensure_b2c_customer() -> str:
+    if not frappe.db.exists('Customer', CUSTOMER_B2C):
+        doc = frappe.new_doc('Customer')
+        doc.customer_name = CUSTOMER_B2C
+        doc.customer_type = 'Individual'
+        doc.insert(ignore_permissions=True)
+    return CUSTOMER_B2C
+
+
+def _configure_settings() -> dict:
+    group = frappe.db.get_value('Item Group', {'is_group': 0}, 'name')
+    settings = frappe.get_single('ZATCA API Settings')
+
+    settings.enabled = 1
+    settings.default_company = COMPANY
+    settings.auto_submit_invoices = 1
+    settings.submit_mode = 'Immediate'
+    settings.update_existing_drafts = 1
+    settings.allow_amend_submitted = 0
+    settings.create_missing_customers = 1
+    settings.create_missing_items = 1
+    settings.create_missing_uoms = 1
+    settings.create_missing_projects = 0
+    settings.default_customer_type = 'Company'
+    settings.default_customer_group = frappe.db.get_value('Customer Group', {'is_group': 0}, 'name')
+    settings.default_territory = frappe.db.get_value('Territory', {'is_group': 0}, 'name')
+    settings.default_item_group = group
+    settings.default_uom = 'Nos'
+    settings.default_country = 'Saudi Arabia'
+    settings.enforce_b2b_address = 1
+    settings.parse_address_display = 1
+    settings.zatca_phase = 'Auto'
+    settings.include_qr_png = 1
+    settings.include_signed_xml = 0
+    settings.wait_for_zatca_seconds = 0
+    settings.require_shared_secret = 0
+    settings.pull_enabled = 0
+    settings.log_requests = 1
+    settings.log_payloads = 1
+    settings.log_retention_days = 30
+    settings.flags.ignore_permissions = True
+    settings.save()
+
+    return {
+        'default_company': settings.default_company,
+        'auto_submit': cint(settings.auto_submit_invoices),
+        'enforce_b2b_address': cint(settings.enforce_b2b_address),
+        'zatca_phase': settings.zatca_phase,
+    }
+
+
+def _ensure_api_user() -> dict:
+    """Create the integration user and issue a fresh key pair.
+
+    The secret is only recoverable at creation time, so it is returned here and must be
+    stored by whoever runs this. Re-running issues a new secret and invalidates the old.
+    """
+    if not frappe.db.exists('User', API_USER):
+        doc = frappe.new_doc('User')
+        doc.email = API_USER
+        doc.first_name = 'ZATCA'
+        doc.last_name = 'API'
+        doc.send_welcome_email = 0
+        doc.flags.no_welcome_mail = True
+        for role in ('Accounts Manager', 'Accounts User', 'System Manager'):
+            if frappe.db.exists('Role', role):
+                doc.append('roles', {'role': role})
+        doc.insert(ignore_permissions=True)
+
+    api_key = cstr(frappe.db.get_value('User', API_USER, 'api_key'))
+    if not api_key:
+        api_key = frappe.generate_hash(length=15)
+        frappe.db.set_value('User', API_USER, 'api_key', api_key)
+
+    api_secret = frappe.generate_hash(length=15)
+    frappe.utils.password.set_encrypted_password('User', API_USER, api_secret, 'api_secret')
+
+    return {'user': API_USER, 'api_key': api_key, 'api_secret': api_secret}
