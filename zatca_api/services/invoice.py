@@ -241,6 +241,36 @@ def _conversion_factor(item_code: str, uom: str) -> float:
     return flt(factor) or 1.0
 
 
+# ZATCA BR-KSA-17: a credit or debit note (invoice type code 383 / 381) must state the
+# reason it was issued. ksa_compliance renders that reason from the Sales Invoice field
+# `custom_return_reason` into the UBL `InstructionNote` element; when the field is empty
+# the element is omitted entirely and ZATCA rejects the document with HTTP 400. Its own
+# hardcoded 'Return of goods' fallback applies only to POS Invoice
+# (ksa_compliance/output_models/e_invoice_output_model.py:96-104), so a Sales Invoice
+# credit note has to supply the text itself or every clearance fails.
+RETURN_REASON_FIELD = 'custom_return_reason'
+DEFAULT_RETURN_REASON = 'Return of goods'
+RETURN_REASON_MAX_LENGTH = 140
+
+
+def _apply_return_reason(doc, payload: dict) -> None:
+    if not (cint(doc.get('is_return')) or cint(doc.get('is_debit_note'))):
+        return
+
+    # Absent ksa_compliance nothing consumes the field, and setting an unknown
+    # fieldname would be silently dropped anyway.
+    if not frappe.get_meta(doc.doctype).get_field(RETURN_REASON_FIELD):
+        return
+
+    reason = cstr(
+        payload.get('return_reason')
+        or doc.get(RETURN_REASON_FIELD)
+        or payload.get('remarks')
+        or DEFAULT_RETURN_REASON
+    ).strip()
+    doc.set(RETURN_REASON_FIELD, reason[:RETURN_REASON_MAX_LENGTH] or DEFAULT_RETURN_REASON)
+
+
 def _apply_header(doc, payload: dict, company: str, customer: str, settings) -> None:
     doc.customer = customer
     doc.company = company
@@ -283,6 +313,8 @@ def _apply_header(doc, payload: dict, company: str, customer: str, settings) -> 
             doc.return_against = payload['return_against']
     if payload.get('is_debit_note'):
         doc.is_debit_note = 1
+
+    _apply_return_reason(doc, payload)
 
     if payload.get('is_pos'):
         doc.is_pos = 1
@@ -434,6 +466,8 @@ def invoice_summary(name: str) -> dict:
         'status': doc.status,
         'is_return': cint(doc.is_return),
         'return_against': doc.return_against,
+        # Echoed so the caller can see the BR-KSA-17 reason that went into the XML.
+        'return_reason': cstr(doc.get(RETURN_REASON_FIELD) or ''),
         'company': doc.company,
         'customer': doc.customer,
         'customer_name': doc.customer_name,

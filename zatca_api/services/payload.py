@@ -21,7 +21,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import cint, cstr, flt, get_datetime, getdate
+from frappe.utils import cint, cstr, flt, get_datetime, getdate, today
 
 from zatca_api.services.envelope import ERR_VALIDATION
 
@@ -72,6 +72,8 @@ INVOICE_ALIASES = {
     'remarks': ('remarks', 'notes', 'comments'),
     'is_return': ('is_return', 'is_credit_note'),
     'return_against': ('return_against', 'against_invoice', 'original_invoice'),
+    # ZATCA BR-KSA-17 requires a stated reason on a credit or debit note.
+    'return_reason': ('return_reason', 'reason', 'credit_note_reason', 'custom_return_reason'),
     'is_debit_note': ('is_debit_note',),
     'update_stock': ('update_stock',),
     'is_pos': ('is_pos', 'is_point_of_sale'),
@@ -238,6 +240,7 @@ def normalise_invoice(raw: dict, is_return: bool = False) -> dict:
         'po_no': cstr(get('po_no') or '').strip(),
         'remarks': cstr(get('remarks') or '').strip(),
         'return_against': cstr(get('return_against') or '').strip(),
+        'return_reason': cstr(get('return_reason') or '').strip(),
         'debit_to': cstr(get('debit_to') or '').strip(),
         'selling_price_list': cstr(get('selling_price_list') or '').strip(),
         'payment_mode': cstr(get('payment_mode') or '').strip(),
@@ -380,11 +383,21 @@ def validate_invoice(payload: dict) -> None:
 
     if payload.get('posting_date'):
         try:
-            getdate(payload['posting_date'])
+            posting_date = getdate(payload['posting_date'])
         except Exception:
             raise PayloadError(
                 _('posting_date {0} is not a valid date.').format(payload['posting_date']),
                 {'field': 'posting_date'},
+            )
+
+        # ZATCA BR-KSA-04: the issue date (BT-2) must be less than or equal to the
+        # current date. Caught here rather than at clearance, because by the time
+        # ZATCA rejects it the invoice is already submitted and posted to the ledger.
+        if posting_date > getdate(today()):
+            message = _('posting_date {0} is in the future. ZATCA rejects a future issue date (BR-KSA-04); send today or an earlier date.')
+            raise PayloadError(
+                message.format(posting_date),
+                {'field': 'posting_date', 'zatca_rule': 'BR-KSA-04'},
             )
 
     if payload.get('is_return') and payload.get('return_against'):
