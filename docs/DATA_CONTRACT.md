@@ -254,6 +254,12 @@ You get back:
 **Nothing is written.** No invoice, no customer, no item. Run it as often as you like
 against the live site.
 
+One limit to know: the dry run validates *creation*, not *submission*. It inserts a
+draft and rolls it back, so checks that only run when the accounting entries are posted
+(fiscal year, period closing) pass here and can still fail on the real call. A clean dry
+run means **your payload is right** — not that our site is fully configured. Tell us if a
+real call fails after a clean dry run; that one is on us.
+
 What to check:
 
 | Field | What to look for |

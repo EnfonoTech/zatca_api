@@ -281,6 +281,14 @@ only**, never submitted, so no GL entry is written and nothing is filed with ZAT
 
 It requires the same `create` permission on Sales Invoice as the real endpoint, so it
 cannot be used to probe the site anonymously.
+> **What the dry run does not cover.** It validates *creation*, not *submission* — the
+> invoice is inserted as a draft and rolled back, never submitted. Checks that only run
+> when GL entries are posted therefore pass here and can still fail on the real call.
+> The one that bit during test-site setup was a missing Fiscal Year:
+> `valid: true` from the dry run, then
+> `Date ... is not in any active Fiscal Year` from `create_invoice`. Treat a clean dry
+> run as "the payload is right", not "the site is configured".
+
 
 ### `create_invoice`
 
