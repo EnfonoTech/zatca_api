@@ -57,6 +57,8 @@
   th{background:var(--brand-lt);color:var(--brand-dk);font-weight:600;font-size:13px}
   tbody tr:last-child td{border-bottom:none}
   .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .lbl{margin:16px 0 4px;font-size:11.5px;font-weight:700;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--muted)}
 
   .note{border-left:4px solid var(--info-line);background:var(--info-bg);
     padding:12px 16px;border-radius:0 6px 6px 0;margin:16px 0}
@@ -698,6 +700,696 @@ that is not exactly 5, or a missing district. Run <code>validate_payload</code> 
 </ul>
 </section>
 
+<section id="examples">
+<h2>Worked examples</h2>
+<p>Seven scenarios, captured against the live Phase 2 test site. Every request and every response below is <strong>real output</strong>, copied from the wire &mdash; not written by hand. The invoice numbers, UUIDs, hashes and QR strings are the actual values ZATCA issued.</p>
+<div class="note"><p>The pattern is the same in all of them: <strong>you</strong> supply business facts and a stable <code>external_id</code>; <strong>we</strong> supply the ERPNext document, the UBL XML, the signature, the hash chain and the QR.</p></div>
+<div class="scroll"><table>
+<thead><tr><th></th><th>Scenario</th><th>Invoice</th><th>Type</th><th>ZATCA</th></tr></thead>
+<tbody>
+<tr><td><strong>A</strong></td><td>B2B standard</td><td><code>ACC-SINV-2026-00019</code></td><td><code>0100000</code></td><td><span class="badge b-ok">Cleared</span></td></tr>
+<tr><td><strong>B</strong></td><td>B2C simplified</td><td><code>ACC-SINV-2026-00018</code></td><td><code>0200000</code></td><td><span class="badge b-ok">Reported</span></td></tr>
+<tr><td><strong>C</strong></td><td>Mixed VAT</td><td><code>ACC-SINV-2026-00021</code></td><td><code>0100000</code></td><td><span class="badge b-ok">Cleared</span></td></tr>
+<tr><td><strong>D</strong></td><td>Credit note</td><td><code>ACC-SINV-2026-00017</code></td><td><code>0100000</code></td><td><span class="badge b-ok">Cleared</span></td></tr>
+<tr><td><strong>E</strong></td><td>Duplicate retry</td><td><code>ACC-SINV-2026-00019</code></td><td><code>n/a</code></td><td><span class="badge b-wait">Not re-filed</span></td></tr>
+<tr><td><strong>F</strong></td><td>Dry run</td><td><code>none created</code></td><td><code>n/a</code></td><td><span class="badge b-wait">Nothing written</span></td></tr>
+<tr><td><strong>G</strong></td><td>Three rejections</td><td><code>none created</code></td><td><code>n/a</code></td><td><span class="badge b-no">Refused</span></td></tr>
+</tbody></table></div>
+<h3>A &middot; B2B standard invoice &mdash; cleared before issue</h3>
+<p><strong>What it proves.</strong> A buyer VAT number makes this a <em>standard</em> invoice: <code>invoice_type_transaction</code> comes back <code>0100000</code> and ZATCA <em>clears</em> it. Compare with example B, which is the same call without a VAT number.</p>
+<p class="lbl">Request</p>
+<pre><code>{
+  &quot;external_id&quot;: &quot;DOC-INV-1785841544&quot;,
+  &quot;customer&quot;: &quot;Al Rajhi Trading Est&quot;,
+  &quot;company&quot;: &quot;ZATCA Test Co&quot;,
+  &quot;tax_id&quot;: &quot;300000000000003&quot;,
+  &quot;posting_date&quot;: &quot;2026-08-04&quot;,
+  &quot;posting_time&quot;: &quot;11:30:00&quot;,
+  &quot;due_date&quot;: &quot;2026-09-03&quot;,
+  &quot;currency&quot;: &quot;SAR&quot;,
+  &quot;po_no&quot;: &quot;PO-4471&quot;,
+  &quot;address_title&quot;: &quot;Al Rajhi Trading Est Billing&quot;,
+  &quot;address_parts&quot;: {
+    &quot;street&quot;: &quot;Olaya Street&quot;,
+    &quot;building_number&quot;: &quot;4521&quot;,
+    &quot;district&quot;: &quot;Al Murabba&quot;,
+    &quot;city&quot;: &quot;Riyadh&quot;,
+    &quot;postal_code&quot;: &quot;12613&quot;,
+    &quot;country&quot;: &quot;Saudi Arabia&quot;
+  },
+  &quot;items&quot;: [
+    {
+      &quot;item_code&quot;: &quot;SVC-IMPL&quot;,
+      &quot;qty&quot;: 10,
+      &quot;rate&quot;: 450,
+      &quot;uom&quot;: &quot;Nos&quot;
+    }
+  ],
+  &quot;submit&quot;: true
+}</code></pre>
+<p class="lbl">Response</p>
+<pre><code>{
+  &quot;success&quot;: true,
+  &quot;request_id&quot;: &quot;45c636639fc7&quot;,
+  &quot;data&quot;: {
+    &quot;action&quot;: &quot;created&quot;,
+    &quot;duplicate&quot;: false,
+    &quot;submitted&quot;: true,
+    &quot;invoice&quot;: {
+      &quot;invoice&quot;: &quot;ACC-SINV-2026-00019&quot;,
+      &quot;external_id&quot;: &quot;DOC-INV-1785841544&quot;,
+      &quot;docstatus&quot;: 1,
+      &quot;status&quot;: &quot;Unpaid&quot;,
+      &quot;is_return&quot;: 0,
+      &quot;return_against&quot;: null,
+      &quot;return_reason&quot;: &quot;&quot;,
+      &quot;company&quot;: &quot;ZATCA Test Co&quot;,
+      &quot;customer&quot;: &quot;Al Rajhi Trading Est&quot;,
+      &quot;customer_name&quot;: &quot;Al Rajhi Trading Est&quot;,
+      &quot;tax_id&quot;: &quot;300000000000003&quot;,
+      &quot;posting_date&quot;: &quot;2026-08-04&quot;,
+      &quot;posting_time&quot;: &quot;11:30:00&quot;,
+      &quot;due_date&quot;: &quot;2026-09-03&quot;,
+      &quot;currency&quot;: &quot;SAR&quot;,
+      &quot;conversion_rate&quot;: 1.0,
+      &quot;net_total&quot;: 4500.0,
+      &quot;total_taxes_and_charges&quot;: 675.0,
+      &quot;grand_total&quot;: 5175.0,
+      &quot;items&quot;: [
+        {
+          &quot;idx&quot;: 1,
+          &quot;item_code&quot;: &quot;SVC-IMPL&quot;,
+          &quot;item_name&quot;: &quot;Implementation services&quot;,
+          &quot;qty&quot;: 10.0,
+          &quot;uom&quot;: &quot;Nos&quot;,
+          &quot;rate&quot;: 450.0,
+          &quot;amount&quot;: 4500.0,
+          &quot;net_amount&quot;: 4500.0,
+          &quot;item_tax_template&quot;: null
+        }
+      ],
+      &quot;taxes&quot;: [
+        {
+          &quot;account_head&quot;: &quot;VAT 15 - ZTC&quot;,
+          &quot;description&quot;: &quot;VAT 15%&quot;,
+          &quot;rate&quot;: 15.0,
+          &quot;tax_amount&quot;: 675.0,
+          &quot;total&quot;: 5175.0
+        }
+      ]
+    },
+    &quot;zatca&quot;: {
+      &quot;available&quot;: true,
+      &quot;phase&quot;: &quot;Phase 2&quot;,
+      &quot;uuid&quot;: &quot;3afa6c2d-350a-4755-9ef4-b5c431a3324e&quot;,
+      &quot;invoice_counter&quot;: 9,
+      &quot;invoice_hash&quot;: &quot;r+dUuBOA3m4hRsxZQBgcDv2wuxnnfixjw3ENu+FuPAU=&quot;,
+      &quot;previous_invoice_hash&quot;: &quot;1rkWqhzGYfBMOJk3ydoVWhqGLTZeyvp6Dtq1fsXGofs=&quot;,
+      &quot;qr_content&quot;: &quot;AQ1aQVRDQSBUZXN0IENvAg8zOTk5OTk5OTk5MDAwMDMD\u2026  (404 chars, base64 TLV)&quot;,
+      &quot;qr_format&quot;: &quot;base64-tlv&quot;,
+      &quot;integration_status&quot;: &quot;Ready For Batch&quot;,
+      &quot;invoice_type_transaction&quot;: &quot;0100000&quot;,
+      &quot;invoice_type_code&quot;: &quot;388&quot;,
+      &quot;is_cleared&quot;: false,
+      &quot;is_pending&quot;: true
+    }
+  }
+}</code></pre>
+<p class="lbl">ZATCA&rsquo;s verdict, polled afterwards</p>
+<pre><code>{
+  &quot;available&quot;: true,
+  &quot;phase&quot;: &quot;Phase 2&quot;,
+  &quot;uuid&quot;: &quot;3afa6c2d-350a-4755-9ef4-b5c431a3324e&quot;,
+  &quot;invoice_counter&quot;: 9,
+  &quot;invoice_hash&quot;: &quot;r+dUuBOA3m4hRsxZQBgcDv2wuxnnfixjw3ENu+FuPAU=&quot;,
+  &quot;previous_invoice_hash&quot;: &quot;1rkWqhzGYfBMOJk3ydoVWhqGLTZeyvp6Dtq1fsXGofs=&quot;,
+  &quot;qr_content&quot;: &quot;AQ1aQVRDQSBUZXN0IENvAg8zOTk5OTk5OTk5MDAwMDMD\u2026  (404 chars, base64 TLV)&quot;,
+  &quot;qr_format&quot;: &quot;base64-tlv&quot;,
+  &quot;integration_status&quot;: &quot;Accepted with warnings&quot;,
+  &quot;invoice_type_transaction&quot;: &quot;0100000&quot;,
+  &quot;invoice_type_code&quot;: &quot;388&quot;,
+  &quot;is_cleared&quot;: true,
+  &quot;is_pending&quot;: false
+}</code></pre>
+<h3>B &middot; B2C simplified invoice &mdash; reported after the fact</h3>
+<p><strong>What it proves.</strong> No <code>tax_id</code>, no address, so it is filed as <em>simplified</em>: <code>0200000</code>. This is the shortest legal payload &mdash; five fields. Note the QR is <strong>longer</strong> than the standard one (500 vs 404 chars) because a simplified QR also carries the certificate signature (TLV tag 9).</p>
+<p class="lbl">Request</p>
+<pre><code>{
+  &quot;external_id&quot;: &quot;DOC-POS-1785841544&quot;,
+  &quot;customer&quot;: &quot;Walk-in Customer&quot;,
+  &quot;company&quot;: &quot;ZATCA Test Co&quot;,
+  &quot;items&quot;: [
+    {
+      &quot;item_code&quot;: &quot;SVC-IMPL&quot;,
+      &quot;qty&quot;: 1,
+      &quot;rate&quot;: 150,
+      &quot;uom&quot;: &quot;Nos&quot;
+    }
+  ],
+  &quot;submit&quot;: true
+}</code></pre>
+<p class="lbl">Response</p>
+<pre><code>{
+  &quot;success&quot;: true,
+  &quot;request_id&quot;: &quot;0864496e6345&quot;,
+  &quot;data&quot;: {
+    &quot;action&quot;: &quot;created&quot;,
+    &quot;duplicate&quot;: false,
+    &quot;submitted&quot;: true,
+    &quot;invoice&quot;: {
+      &quot;invoice&quot;: &quot;ACC-SINV-2026-00018&quot;,
+      &quot;external_id&quot;: &quot;DOC-POS-1785841544&quot;,
+      &quot;docstatus&quot;: 1,
+      &quot;status&quot;: &quot;Unpaid&quot;,
+      &quot;is_return&quot;: 0,
+      &quot;return_against&quot;: null,
+      &quot;return_reason&quot;: &quot;&quot;,
+      &quot;company&quot;: &quot;ZATCA Test Co&quot;,
+      &quot;customer&quot;: &quot;Walk-in Customer&quot;,
+      &quot;customer_name&quot;: &quot;Walk-in Customer&quot;,
+      &quot;tax_id&quot;: null,
+      &quot;posting_date&quot;: &quot;2026-08-04&quot;,
+      &quot;posting_time&quot;: &quot;14:05:48.866691&quot;,
+      &quot;due_date&quot;: &quot;2026-08-04&quot;,
+      &quot;currency&quot;: &quot;SAR&quot;,
+      &quot;conversion_rate&quot;: 1.0,
+      &quot;net_total&quot;: 150.0,
+      &quot;total_taxes_and_charges&quot;: 22.5,
+      &quot;grand_total&quot;: 172.5,
+      &quot;items&quot;: [
+        {
+          &quot;idx&quot;: 1,
+          &quot;item_code&quot;: &quot;SVC-IMPL&quot;,
+          &quot;item_name&quot;: &quot;Implementation services&quot;,
+          &quot;qty&quot;: 1.0,
+          &quot;uom&quot;: &quot;Nos&quot;,
+          &quot;rate&quot;: 150.0,
+          &quot;amount&quot;: 150.0,
+          &quot;net_amount&quot;: 150.0,
+          &quot;item_tax_template&quot;: null
+        }
+      ],
+      &quot;taxes&quot;: [
+        {
+          &quot;account_head&quot;: &quot;VAT 15 - ZTC&quot;,
+          &quot;description&quot;: &quot;VAT 15%&quot;,
+          &quot;rate&quot;: 15.0,
+          &quot;tax_amount&quot;: 22.5,
+          &quot;total&quot;: 172.5
+        }
+      ]
+    },
+    &quot;zatca&quot;: {
+      &quot;available&quot;: true,
+      &quot;phase&quot;: &quot;Phase 2&quot;,
+      &quot;uuid&quot;: &quot;e336d40a-1ed4-402b-b7c7-f3ddb6835628&quot;,
+      &quot;invoice_counter&quot;: 8,
+      &quot;invoice_hash&quot;: &quot;1rkWqhzGYfBMOJk3ydoVWhqGLTZeyvp6Dtq1fsXGofs=&quot;,
+      &quot;previous_invoice_hash&quot;: &quot;nGR/5OqUiH0xhtWS4isaZ/Xm5a7pLo0ZpDEfKchbcOk=&quot;,
+      &quot;qr_content&quot;: &quot;AQ1aQVRDQSBUZXN0IENvAg8zOTk5OTk5OTk5MDAwMDMD\u2026  (500 chars, base64 TLV)&quot;,
+      &quot;qr_format&quot;: &quot;base64-tlv&quot;,
+      &quot;integration_status&quot;: &quot;Ready For Batch&quot;,
+      &quot;invoice_type_transaction&quot;: &quot;0200000&quot;,
+      &quot;invoice_type_code&quot;: &quot;388&quot;,
+      &quot;is_cleared&quot;: false,
+      &quot;is_pending&quot;: true
+    }
+  },
+  &quot;warnings&quot;: [
+    &quot;Buyer address has no street name (address_line1).&quot;,
+    &quot;Buyer address has no city.&quot;,
+    &quot;Buyer address has no building number (custom_building_number).&quot;,
+    &quot;Buyer address has no postal code (pincode).&quot;,
+    &quot;Buyer address has no district (custom_area).&quot;
+  ]
+}</code></pre>
+<p class="lbl">ZATCA&rsquo;s verdict, polled afterwards</p>
+<pre><code>{
+  &quot;available&quot;: true,
+  &quot;phase&quot;: &quot;Phase 2&quot;,
+  &quot;uuid&quot;: &quot;e336d40a-1ed4-402b-b7c7-f3ddb6835628&quot;,
+  &quot;invoice_counter&quot;: 8,
+  &quot;invoice_hash&quot;: &quot;1rkWqhzGYfBMOJk3ydoVWhqGLTZeyvp6Dtq1fsXGofs=&quot;,
+  &quot;previous_invoice_hash&quot;: &quot;nGR/5OqUiH0xhtWS4isaZ/Xm5a7pLo0ZpDEfKchbcOk=&quot;,
+  &quot;qr_content&quot;: &quot;AQ1aQVRDQSBUZXN0IENvAg8zOTk5OTk5OTk5MDAwMDMD\u2026  (500 chars, base64 TLV)&quot;,
+  &quot;qr_format&quot;: &quot;base64-tlv&quot;,
+  &quot;integration_status&quot;: &quot;Accepted with warnings&quot;,
+  &quot;invoice_type_transaction&quot;: &quot;0200000&quot;,
+  &quot;invoice_type_code&quot;: &quot;388&quot;,
+  &quot;is_cleared&quot;: true,
+  &quot;is_pending&quot;: false
+}</code></pre>
+<h3>C &middot; Mixed VAT &mdash; 15% and zero-rated on one invoice</h3>
+<p><strong>What it proves.</strong> Per-line <code>item_tax_template</code> produces <strong>150</strong> VAT on 2,000 net, not 300. ZATCA receives two VAT categories: <code>S</code> at 15% on 1,000, and <code>Z</code> at 0% on 1,000 with exemption code <code>VATEX-SA-32</code>.</p>
+<p class="lbl">Request</p>
+<pre><code>{
+  &quot;external_id&quot;: &quot;DOC-MIX-1785841765&quot;,
+  &quot;customer&quot;: &quot;Al Rajhi Trading Est&quot;,
+  &quot;company&quot;: &quot;ZATCA Test Co&quot;,
+  &quot;tax_id&quot;: &quot;300000000000003&quot;,
+  &quot;address_title&quot;: &quot;Al Rajhi Trading Est Billing&quot;,
+  &quot;address_parts&quot;: {
+    &quot;street&quot;: &quot;Olaya Street&quot;,
+    &quot;building_number&quot;: &quot;4521&quot;,
+    &quot;district&quot;: &quot;Al Murabba&quot;,
+    &quot;city&quot;: &quot;Riyadh&quot;,
+    &quot;postal_code&quot;: &quot;12613&quot;,
+    &quot;country&quot;: &quot;Saudi Arabia&quot;
+  },
+  &quot;items&quot;: [
+    {
+      &quot;item_code&quot;: &quot;SVC-IMPL&quot;,
+      &quot;qty&quot;: 1,
+      &quot;rate&quot;: 1000,
+      &quot;uom&quot;: &quot;Nos&quot;,
+      &quot;item_tax_template&quot;: &quot;KSA VAT 15 - ZTC&quot;
+    },
+    {
+      &quot;item_code&quot;: &quot;SVC-EXPORT&quot;,
+      &quot;qty&quot;: 1,
+      &quot;rate&quot;: 1000,
+      &quot;uom&quot;: &quot;Nos&quot;,
+      &quot;item_tax_template&quot;: &quot;KSA Zero Rated - ZTC&quot;
+    }
+  ],
+  &quot;submit&quot;: true
+}</code></pre>
+<p class="lbl">Response</p>
+<pre><code>{
+  &quot;success&quot;: true,
+  &quot;request_id&quot;: &quot;46145f34ae0c&quot;,
+  &quot;data&quot;: {
+    &quot;action&quot;: &quot;created&quot;,
+    &quot;duplicate&quot;: false,
+    &quot;submitted&quot;: true,
+    &quot;invoice&quot;: {
+      &quot;invoice&quot;: &quot;ACC-SINV-2026-00021&quot;,
+      &quot;external_id&quot;: &quot;DOC-MIX-1785841765&quot;,
+      &quot;docstatus&quot;: 1,
+      &quot;status&quot;: &quot;Unpaid&quot;,
+      &quot;is_return&quot;: 0,
+      &quot;return_against&quot;: null,
+      &quot;return_reason&quot;: &quot;&quot;,
+      &quot;company&quot;: &quot;ZATCA Test Co&quot;,
+      &quot;customer&quot;: &quot;Al Rajhi Trading Est&quot;,
+      &quot;customer_name&quot;: &quot;Al Rajhi Trading Est&quot;,
+      &quot;tax_id&quot;: &quot;300000000000003&quot;,
+      &quot;posting_date&quot;: &quot;2026-08-04&quot;,
+      &quot;posting_time&quot;: &quot;14:09:26.322730&quot;,
+      &quot;due_date&quot;: &quot;2026-08-04&quot;,
+      &quot;currency&quot;: &quot;SAR&quot;,
+      &quot;conversion_rate&quot;: 1.0,
+      &quot;net_total&quot;: 2000.0,
+      &quot;total_taxes_and_charges&quot;: 150.0,
+      &quot;grand_total&quot;: 2150.0,
+      &quot;items&quot;: [
+        {
+          &quot;idx&quot;: 1,
+          &quot;item_code&quot;: &quot;SVC-IMPL&quot;,
+          &quot;item_name&quot;: &quot;Implementation services&quot;,
+          &quot;qty&quot;: 1.0,
+          &quot;uom&quot;: &quot;Nos&quot;,
+          &quot;rate&quot;: 1000.0,
+          &quot;amount&quot;: 1000.0,
+          &quot;net_amount&quot;: 1000.0,
+          &quot;item_tax_template&quot;: &quot;KSA VAT 15 - ZTC&quot;
+        },
+        {
+          &quot;idx&quot;: 2,
+          &quot;item_code&quot;: &quot;SVC-EXPORT&quot;,
+          &quot;item_name&quot;: &quot;Export services&quot;,
+          &quot;qty&quot;: 1.0,
+          &quot;uom&quot;: &quot;Nos&quot;,
+          &quot;rate&quot;: 1000.0,
+          &quot;amount&quot;: 1000.0,
+          &quot;net_amount&quot;: 1000.0,
+          &quot;item_tax_template&quot;: &quot;KSA Zero Rated - ZTC&quot;
+        }
+      ],
+      &quot;taxes&quot;: [
+        {
+          &quot;account_head&quot;: &quot;VAT 15 - ZTC&quot;,
+          &quot;description&quot;: &quot;VAT 15%&quot;,
+          &quot;rate&quot;: 15.0,
+          &quot;tax_amount&quot;: 150.0,
+          &quot;total&quot;: 2150.0
+        }
+      ]
+    },
+    &quot;zatca&quot;: {
+      &quot;available&quot;: true,
+      &quot;phase&quot;: &quot;Phase 2&quot;,
+      &quot;uuid&quot;: &quot;f28b99d7-e4b7-4b97-9e88-36a51bedb38e&quot;,
+      &quot;invoice_counter&quot;: 11,
+      &quot;invoice_hash&quot;: &quot;ygttvN2KCEgHeOX+dDDoBp4hlYwdnnQHrMNUqoADSBo=&quot;,
+      &quot;previous_invoice_hash&quot;: &quot;OubBefinx2O+L7Eu3LseSn/VMJ5+uocyLD5gA2jN5u8=&quot;,
+      &quot;qr_content&quot;: &quot;AQ1aQVRDQSBUZXN0IENvAg8zOTk5OTk5OTk5MDAwMDMD\u2026  (400 chars, base64 TLV)&quot;,
+      &quot;qr_format&quot;: &quot;base64-tlv&quot;,
+      &quot;integration_status&quot;: &quot;Ready For Batch&quot;,
+      &quot;invoice_type_transaction&quot;: &quot;0100000&quot;,
+      &quot;invoice_type_code&quot;: &quot;388&quot;,
+      &quot;is_cleared&quot;: false,
+      &quot;is_pending&quot;: true
+    }
+  }
+}</code></pre>
+<p class="lbl">ZATCA&rsquo;s verdict, polled afterwards</p>
+<pre><code>{
+  &quot;available&quot;: true,
+  &quot;phase&quot;: &quot;Phase 2&quot;,
+  &quot;uuid&quot;: &quot;f28b99d7-e4b7-4b97-9e88-36a51bedb38e&quot;,
+  &quot;invoice_counter&quot;: 11,
+  &quot;invoice_hash&quot;: &quot;ygttvN2KCEgHeOX+dDDoBp4hlYwdnnQHrMNUqoADSBo=&quot;,
+  &quot;previous_invoice_hash&quot;: &quot;OubBefinx2O+L7Eu3LseSn/VMJ5+uocyLD5gA2jN5u8=&quot;,
+  &quot;qr_content&quot;: &quot;AQ1aQVRDQSBUZXN0IENvAg8zOTk5OTk5OTk5MDAwMDMD\u2026  (400 chars, base64 TLV)&quot;,
+  &quot;qr_format&quot;: &quot;base64-tlv&quot;,
+  &quot;integration_status&quot;: &quot;Accepted with warnings&quot;,
+  &quot;invoice_type_transaction&quot;: &quot;0100000&quot;,
+  &quot;invoice_type_code&quot;: &quot;388&quot;,
+  &quot;is_cleared&quot;: true,
+  &quot;is_pending&quot;: false
+}</code></pre>
+<div class="danger"><p><strong>The trap that rejected our first attempt.</strong> The two lines must use <strong>different <code>item_code</code> values</strong>. ERPNext keys its per-line tax detail by item code, so sending the same code twice with two different templates collapses them, and the standard-rated subtotal reaches ZATCA with a tax amount of <code>0.0</code> while the header still says 150. ZATCA rejects it with <code>BR-CO-14</code> and <code>BR-CO-15</code>. One item code per VAT category per invoice.</p></div>
+<h3>D &middot; Credit note &mdash; against a cleared invoice</h3>
+<p><strong>What it proves.</strong> Quantities and totals come back negative, the ZATCA counter advances, and <code>return_reason</code> is echoed so you can confirm the reason ZATCA requires actually reached the XML.</p>
+<p>This one also shows the <strong>two-step flow</strong>: the create call returns a <em>draft</em> (<code>"submitted": false</code>, no QR yet), then a separate <code>submit_invoice</code> call posts it and files it with ZATCA. Send <code>"submit": true</code> on the create call to do both at once, as examples A to C do.</p>
+<p class="lbl">Request</p>
+<pre><code>{
+  &quot;external_id&quot;: &quot;T1785840982-CN&quot;,
+  &quot;customer&quot;: &quot;Al Rajhi Trading Est&quot;,
+  &quot;company&quot;: &quot;ZATCA Test Co&quot;,
+  &quot;tax_id&quot;: &quot;300000000000003&quot;,
+  &quot;return_against&quot;: &quot;ACC-SINV-2026-00011&quot;,
+  &quot;return_reason&quot;: &quot;Two onsite days cancelled by the customer&quot;,
+  &quot;address_title&quot;: &quot;Al Rajhi Trading Est Billing&quot;,
+  &quot;address_parts&quot;: {
+    &quot;street&quot;: &quot;Olaya Street&quot;,
+    &quot;building_number&quot;: &quot;4521&quot;,
+    &quot;district&quot;: &quot;Al Murabba&quot;,
+    &quot;city&quot;: &quot;Riyadh&quot;,
+    &quot;postal_code&quot;: &quot;12613&quot;,
+    &quot;country&quot;: &quot;Saudi Arabia&quot;
+  },
+  &quot;items&quot;: [
+    {
+      &quot;item_code&quot;: &quot;SVC-IMPL&quot;,
+      &quot;qty&quot;: 2,
+      &quot;rate&quot;: 450,
+      &quot;uom&quot;: &quot;Nos&quot;
+    }
+  ]
+}</code></pre>
+<p class="lbl">Response to the create call &mdash; still a draft</p>
+<pre><code>{
+  &quot;success&quot;: true,
+  &quot;request_id&quot;: &quot;400c63a52623&quot;,
+  &quot;data&quot;: {
+    &quot;action&quot;: &quot;created&quot;,
+    &quot;duplicate&quot;: false,
+    &quot;submitted&quot;: false,
+    &quot;invoice&quot;: {
+      &quot;invoice&quot;: &quot;ACC-SINV-2026-00017&quot;,
+      &quot;external_id&quot;: &quot;T1785840982-CN&quot;,
+      &quot;docstatus&quot;: 0,
+      &quot;status&quot;: &quot;Draft&quot;,
+      &quot;is_return&quot;: 1,
+      &quot;return_against&quot;: &quot;ACC-SINV-2026-00011&quot;,
+      &quot;return_reason&quot;: &quot;Two onsite days cancelled by the customer&quot;,
+      &quot;company&quot;: &quot;ZATCA Test Co&quot;,
+      &quot;customer&quot;: &quot;Al Rajhi Trading Est&quot;,
+      &quot;customer_name&quot;: &quot;Al Rajhi Trading Est&quot;,
+      &quot;tax_id&quot;: &quot;300000000000003&quot;,
+      &quot;posting_date&quot;: &quot;2026-08-04&quot;,
+      &quot;posting_time&quot;: &quot;13:56:26.157412&quot;,
+      &quot;due_date&quot;: &quot;2026-08-04&quot;,
+      &quot;currency&quot;: &quot;SAR&quot;,
+      &quot;conversion_rate&quot;: 1.0,
+      &quot;net_total&quot;: -900.0,
+      &quot;total_taxes_and_charges&quot;: -135.0,
+      &quot;grand_total&quot;: -1035.0,
+      &quot;items&quot;: [
+        {
+          &quot;idx&quot;: 1,
+          &quot;item_code&quot;: &quot;SVC-IMPL&quot;,
+          &quot;item_name&quot;: &quot;Implementation services&quot;,
+          &quot;qty&quot;: -2.0,
+          &quot;uom&quot;: &quot;Nos&quot;,
+          &quot;rate&quot;: 450.0,
+          &quot;amount&quot;: -900.0,
+          &quot;net_amount&quot;: -900.0,
+          &quot;item_tax_template&quot;: null
+        }
+      ],
+      &quot;taxes&quot;: [
+        {
+          &quot;account_head&quot;: &quot;VAT 15 - ZTC&quot;,
+          &quot;description&quot;: &quot;VAT 15%&quot;,
+          &quot;rate&quot;: 15.0,
+          &quot;tax_amount&quot;: -135.0,
+          &quot;total&quot;: -1035.0
+        }
+      ]
+    },
+    &quot;zatca&quot;: {
+      &quot;available&quot;: false,
+      &quot;phase&quot;: &quot;None&quot;,
+      &quot;reason&quot;: &quot;Invoice is in Draft. A ZATCA QR only exists for a submitted invoice.&quot;
+    }
+  }
+}</code></pre>
+<p class="lbl">ZATCA&rsquo;s verdict, polled afterwards</p>
+<pre><code>{
+  &quot;available&quot;: true,
+  &quot;phase&quot;: &quot;Phase 2&quot;,
+  &quot;uuid&quot;: &quot;a96d00c8-4128-422a-84d0-e8c9f029735b&quot;,
+  &quot;invoice_counter&quot;: 7,
+  &quot;invoice_hash&quot;: &quot;nGR/5OqUiH0xhtWS4isaZ/Xm5a7pLo0ZpDEfKchbcOk=&quot;,
+  &quot;previous_invoice_hash&quot;: &quot;DysjM2JDEfI8BgsLuojE5QgiJbTYmMmDYnYKYf1rHh8=&quot;,
+  &quot;qr_content&quot;: &quot;AQ1aQVRDQSBUZXN0IENvAg8zOTk5OTk5OTk5MDAwMDMD\u2026  (404 chars, base64 TLV)&quot;,
+  &quot;qr_format&quot;: &quot;base64-tlv&quot;,
+  &quot;integration_status&quot;: &quot;Accepted with warnings&quot;,
+  &quot;invoice_type_transaction&quot;: &quot;0100000&quot;,
+  &quot;invoice_type_code&quot;: &quot;381&quot;,
+  &quot;is_cleared&quot;: true,
+  &quot;is_pending&quot;: false
+}</code></pre>
+<div class="danger"><p><strong><code>return_reason</code> is not optional in practice.</strong> ZATCA rejects a credit or debit note that does not state why it was issued (<code>BR-KSA-17</code>). Send a real business reason; if you omit it we fall back to your <code>remarks</code>, and then to <code>"Return of goods"</code>, so the filing never fails &mdash; but the reason on record will not be yours.</p></div>
+<h3>E &middot; The same request sent twice &mdash; idempotency</h3>
+<p><strong>What it proves.</strong> Re-sending example A byte for byte returns the <em>same</em> invoice with <code>"action": "duplicate"</code>. No second invoice, no second filing, no second VAT liability. This is why <code>external_id</code> must be stable: it is the deduplication key. Safe to retry on a timeout.</p>
+<p class="lbl">Request</p>
+<pre><code>{
+  &quot;external_id&quot;: &quot;DOC-INV-1785841544&quot;,
+  &quot;customer&quot;: &quot;Al Rajhi Trading Est&quot;,
+  &quot;company&quot;: &quot;ZATCA Test Co&quot;,
+  &quot;tax_id&quot;: &quot;300000000000003&quot;,
+  &quot;posting_date&quot;: &quot;2026-08-04&quot;,
+  &quot;posting_time&quot;: &quot;11:30:00&quot;,
+  &quot;due_date&quot;: &quot;2026-09-03&quot;,
+  &quot;currency&quot;: &quot;SAR&quot;,
+  &quot;po_no&quot;: &quot;PO-4471&quot;,
+  &quot;address_title&quot;: &quot;Al Rajhi Trading Est Billing&quot;,
+  &quot;address_parts&quot;: {
+    &quot;street&quot;: &quot;Olaya Street&quot;,
+    &quot;building_number&quot;: &quot;4521&quot;,
+    &quot;district&quot;: &quot;Al Murabba&quot;,
+    &quot;city&quot;: &quot;Riyadh&quot;,
+    &quot;postal_code&quot;: &quot;12613&quot;,
+    &quot;country&quot;: &quot;Saudi Arabia&quot;
+  },
+  &quot;items&quot;: [
+    {
+      &quot;item_code&quot;: &quot;SVC-IMPL&quot;,
+      &quot;qty&quot;: 10,
+      &quot;rate&quot;: 450,
+      &quot;uom&quot;: &quot;Nos&quot;
+    }
+  ],
+  &quot;submit&quot;: true
+}</code></pre>
+<p class="lbl">Response</p>
+<pre><code>{
+  &quot;success&quot;: true,
+  &quot;data&quot;: {
+    &quot;action&quot;: &quot;duplicate&quot;,
+    &quot;duplicate&quot;: true,
+    &quot;submitted&quot;: true,
+    &quot;invoice&quot;: {
+      &quot;invoice&quot;: &quot;ACC-SINV-2026-00019&quot;,
+      &quot;external_id&quot;: &quot;DOC-INV-1785841544&quot;,
+      &quot;grand_total&quot;: 5175.0,
+      &quot;docstatus&quot;: 1
+    }
+  }
+}</code></pre>
+<h3>F &middot; Dry run &mdash; writes nothing</h3>
+<p><strong>What it proves.</strong> Everything is resolved and priced inside a transaction that is then rolled back. Use it in your own test suite and before a first go-live batch. <code>zatca_readiness</code> tells you how the invoice <em>would</em> be classified and whether ZATCA would reject it &mdash; before any document exists.</p>
+<p class="lbl">Request</p>
+<pre><code>{
+  &quot;external_id&quot;: &quot;T1785841281-DRY&quot;,
+  &quot;customer&quot;: &quot;Al Rajhi Trading Est&quot;,
+  &quot;company&quot;: &quot;ZATCA Test Co&quot;,
+  &quot;tax_id&quot;: &quot;300000000000003&quot;,
+  &quot;address_title&quot;: &quot;Al Rajhi Trading Est Billing&quot;,
+  &quot;address_parts&quot;: {
+    &quot;street&quot;: &quot;Olaya Street&quot;,
+    &quot;building_number&quot;: &quot;4521&quot;,
+    &quot;district&quot;: &quot;Al Murabba&quot;,
+    &quot;city&quot;: &quot;Riyadh&quot;,
+    &quot;postal_code&quot;: &quot;12613&quot;,
+    &quot;country&quot;: &quot;Saudi Arabia&quot;
+  },
+  &quot;items&quot;: [
+    {
+      &quot;item_code&quot;: &quot;SVC-IMPL&quot;,
+      &quot;qty&quot;: 3,
+      &quot;rate&quot;: 1500,
+      &quot;uom&quot;: &quot;Nos&quot;
+    }
+  ]
+}</code></pre>
+<p class="lbl">Response</p>
+<pre><code>{
+  &quot;success&quot;: true,
+  &quot;data&quot;: {
+    &quot;valid&quot;: true,
+    &quot;document_type&quot;: &quot;Sales Invoice&quot;,
+    &quot;errors&quot;: [],
+    &quot;warnings&quot;: [],
+    &quot;would_create&quot;: {
+      &quot;customer_exists&quot;: true,
+      &quot;existing_items&quot;: [
+        &quot;SVC-IMPL&quot;
+      ],
+      &quot;new_items&quot;: [],
+      &quot;new_uoms&quot;: [],
+      &quot;project_exists&quot;: false
+    },
+    &quot;resolved&quot;: {
+      &quot;external_id&quot;: &quot;T1785841281-DRY&quot;,
+      &quot;customer&quot;: &quot;Al Rajhi Trading Est&quot;,
+      &quot;company&quot;: &quot;ZATCA Test Co&quot;,
+      &quot;posting_date&quot;: &quot;&quot;,
+      &quot;item_count&quot;: 1,
+      &quot;is_return&quot;: false
+    },
+    &quot;totals&quot;: {
+      &quot;currency&quot;: &quot;SAR&quot;,
+      &quot;net_total&quot;: 4500.0,
+      &quot;total_taxes_and_charges&quot;: 675.0,
+      &quot;grand_total&quot;: 5175.0,
+      &quot;rounded_total&quot;: 5175.0,
+      &quot;tax_rows&quot;: [
+        {
+          &quot;account_head&quot;: &quot;VAT 15 - ZTC&quot;,
+          &quot;rate&quot;: 15.0,
+          &quot;tax_amount&quot;: 675.0
+        }
+      ]
+    },
+    &quot;zatca&quot;: {
+      &quot;invoice_type&quot;: &quot;Standard&quot;,
+      &quot;reason&quot;: &quot;Buyer has a VAT registration number or another ZATCA identifier.&quot;,
+      &quot;buyer_is_b2b&quot;: true,
+      &quot;invoice_mode&quot;: &quot;Let the system decide (both)&quot;
+    },
+    &quot;dry_run&quot;: true,
+    &quot;zatca_readiness&quot;: {
+      &quot;invoice_type&quot;: &quot;Standard&quot;,
+      &quot;buyer_is_b2b&quot;: true,
+      &quot;would_be_rejected_by_zatca&quot;: false,
+      &quot;blocking&quot;: [],
+      &quot;advisory&quot;: []
+    }
+  }
+}</code></pre>
+<h3>G &middot; The three rejections you should expect</h3><p>All three are refused <strong>before anything is written</strong>. Nothing is created, nothing is filed, nothing needs cleaning up. Retrying without fixing the payload gives the identical error.</p>
+<p class="lbl">G1 &mdash; missing required fields</p><pre><code>{
+  &quot;company&quot;: &quot;ZATCA Test Co&quot;
+}</code></pre><pre><code>{
+  &quot;success&quot;: false,
+  &quot;errors&quot;: [
+    {
+      &quot;code&quot;: &quot;validation_error&quot;,
+      &quot;message&quot;: &quot;Missing required field(s): external_id, customer, items.&quot;,
+      &quot;details&quot;: {
+        &quot;missing&quot;: [
+          &quot;external_id&quot;,
+          &quot;customer&quot;,
+          &quot;items&quot;
+        ]
+      }
+    }
+  ]
+}</code></pre>
+<p class="lbl">G2 &mdash; a B2B buyer with no address</p><pre><code>{
+  &quot;external_id&quot;: &quot;T1785841281-NOADDR&quot;,
+  &quot;customer&quot;: &quot;Al Rajhi Trading Est&quot;,
+  &quot;company&quot;: &quot;ZATCA Test Co&quot;,
+  &quot;tax_id&quot;: &quot;300000000000003&quot;,
+  &quot;items&quot;: [
+    {
+      &quot;item_code&quot;: &quot;SVC-IMPL&quot;,
+      &quot;qty&quot;: 1,
+      &quot;rate&quot;: 500,
+      &quot;uom&quot;: &quot;Nos&quot;
+    }
+  ]
+}</code></pre><pre><code>{
+  &quot;success&quot;: false,
+  &quot;errors&quot;: [
+    {
+      &quot;code&quot;: &quot;validation_error&quot;,
+      &quot;message&quot;: &quot;A complete buyer address is mandatory for a B2B customer, because ZATCA rejects a standard invoice without one. Problems: Buyer address has no street name (address_line1). Buyer address has no city. Buyer address has no building number (custom_building_number). Buyer address has no postal code (pincode). Buyer address has no district (custom_area).&quot;,
+      &quot;details&quot;: {
+        &quot;field&quot;: &quot;address_parts&quot;,
+        &quot;customer&quot;: &quot;Al Rajhi Trading Est&quot;,
+        &quot;is_b2b&quot;: true,
+        &quot;problems&quot;: [
+          &quot;Buyer address has no street name (address_line1).&quot;,
+          &quot;Buyer address has no city.&quot;,
+          &quot;Buyer address has no building number (custom_building_number).&quot;,
+          &quot;Buyer address has no postal code (pincode).&quot;,
+          &quot;Buyer address has no district (custom_area).&quot;
+        ],
+        &quot;required&quot;: [
+          &quot;street&quot;,
+          &quot;building_number (4 digits)&quot;,
+          &quot;district&quot;,
+          &quot;city&quot;,
+          &quot;postal_code (5 digits)&quot;
+        ]
+      }
+    }
+  ]
+}</code></pre><p>A VAT number was sent, so the invoice is standard, so ZATCA requires a complete buyer address. Every missing part is named in one response &mdash; you do not have to fix them one at a time.</p>
+<p class="lbl">G3 &mdash; an issue date in the future</p><pre><code>{
+  &quot;external_id&quot;: &quot;T1785840909-FUT&quot;,
+  &quot;customer&quot;: &quot;Walk-in Customer&quot;,
+  &quot;company&quot;: &quot;ZATCA Test Co&quot;,
+  &quot;posting_date&quot;: &quot;2026-08-20&quot;,
+  &quot;items&quot;: [
+    {
+      &quot;item_code&quot;: &quot;SVC-IMPL&quot;,
+      &quot;qty&quot;: 1,
+      &quot;rate&quot;: 100,
+      &quot;uom&quot;: &quot;Nos&quot;
+    }
+  ]
+}</code></pre><pre><code>{
+  &quot;success&quot;: false,
+  &quot;errors&quot;: [
+    {
+      &quot;code&quot;: &quot;validation_error&quot;,
+      &quot;message&quot;: &quot;posting_date 2026-08-20 is in the future. ZATCA rejects a future issue date (BR-KSA-04); send today or an earlier date.&quot;,
+      &quot;details&quot;: {
+        &quot;field&quot;: &quot;posting_date&quot;,
+        &quot;zatca_rule&quot;: &quot;BR-KSA-04&quot;
+      }
+    }
+  ]
+}</code></pre><p>ZATCA only reports this at clearance &mdash; by which point the invoice is submitted and posted to the ledger, and unwinding it is a manual job. We refuse the payload instead.</p>
+</section>
+
 <section id="payload">
 <h2>Payload fields</h2>
 <p>Key names are matched case- and separator-insensitively, so <code>"Customer Name"</code>,
@@ -724,12 +1416,13 @@ canonical &mdash; build to these.</p>
 <tr><td><code>buyer_id_type</code> + <code>buyer_id_value</code></td>
     <td>For a business buyer with no VAT number. Codes: TIN, CRN, MOM, MLS, SAG, NAT, GCC, IQA, PAS, OTH.</td></tr>
 <tr><td><code>posting_date</code>, <code>posting_time</code></td>
-    <td><code>YYYY-MM-DD</code> and <code>HH:MM:SS</code>. The time goes into the QR &mdash; send the real one.</td></tr>
+    <td><code>YYYY-MM-DD</code> and <code>HH:MM:SS</code>. The time goes into the QR &mdash; send the real one. <strong>Never in the future</strong> (<code>BR-KSA-04</code>); backdating is fine.</td></tr>
 <tr><td><code>due_date</code>, <code>currency</code>, <code>conversion_rate</code></td><td></td></tr>
 <tr><td><code>address_parts</code></td><td>Buyer address. Mandatory for B2B &mdash; see below.</td></tr>
 <tr><td><code>taxes</code> / <code>tax_template</code></td><td>Omit to use the company default.</td></tr>
 <tr><td><code>po_no</code>, <code>remarks</code>, <code>project</code>, <code>cost_center</code></td><td>Pass-through.</td></tr>
 <tr><td><code>is_return</code>, <code>return_against</code></td><td>Credit notes.</td></tr>
+<tr><td><code>return_reason</code></td><td>Why the credit note was issued. <strong>ZATCA rejects a credit note with no reason</strong> (<code>BR-KSA-17</code>); we fall back to <code>remarks</code>, then to a default.</td></tr>
 <tr><td><code>submit</code></td><td>Send <code>false</code> to leave it as a draft. No QR is produced then.</td></tr>
 </tbody></table></div>
 
@@ -742,7 +1435,7 @@ canonical &mdash; build to these.</p>
 <tr><td><code>rate</code></td><td><strong>Excluding VAT.</strong> Never negative &mdash; use <code>is_return</code>.</td></tr>
 <tr><td><code>item_name</code></td><td>Send it the first time we see a code, so the item is created with a real name.</td></tr>
 <tr><td><code>uom</code></td><td>Tell us your list up front so we can pre-create them.</td></tr>
-<tr><td><code>item_tax_template</code></td><td><strong>Required on mixed-rate invoices</strong> &mdash; see below.</td></tr>
+<tr><td><code>item_tax_template</code></td><td><strong>Required on mixed-rate invoices</strong> &mdash; and each category needs its own <code>item_code</code>. See below.</td></tr>
 <tr><td><code>discount_percentage</code> / <code>discount_amount</code></td><td></td></tr>
 </tbody></table></div>
 </section>
@@ -790,21 +1483,52 @@ not numbers, so leading zeros survive. And <code>tax_id</code> is 15 digits
 lines get the same rate and ZATCA receives the wrong per-line VAT category. We will give
 you the exact template names.</p>
 <p>If every line is always standard 15%, omit it entirely.</p>
+
+<div class="danger">
+<p><strong>And use a different <code>item_code</code> for each VAT category.</strong>
+ERPNext stores its per-line tax detail keyed by item code. Two lines that share one code
+but carry different <code>item_tax_template</code> values collapse into a single entry, and
+the standard-rated subtotal reaches ZATCA with a tax amount of <code>0.0</code> while the
+invoice header still declares the full VAT. ZATCA rejects it.</p>
+<p>Verified on the test site: identical payloads, one with the same code on both lines
+&rarr; <code>BR-CO-14</code> + <code>BR-CO-15</code>, <em>rejected</em>; one with distinct
+codes &rarr; <em>cleared</em>. See <a href="#examples">worked example C</a>.</p>
+</div>
+
+<h3>Credit notes must say why</h3>
+<p>A credit or debit note has to state the reason it was issued
+(<code>BR-KSA-17</code>) &mdash; it becomes the <code>InstructionNote</code> element in the
+XML. Send <code>return_reason</code>. If you leave it out we substitute your
+<code>remarks</code>, and failing that a default, so the filing still succeeds; but the
+reason on the permanent record will be ours rather than yours.</p>
+<pre><code>&quot;return_reason&quot;: &quot;Two onsite days cancelled by the customer&quot;</code></pre>
+
+<h3>The issue date may not be in the future</h3>
+<p><code>posting_date</code> must be today or earlier (<code>BR-KSA-04</code>). ZATCA only
+raises this at clearance, when the invoice is already submitted and in the ledger, so we
+refuse a future date at the door instead. Backdating is fine.</p>
 </section>
 
 <section id="creditnote">
 <h2>Credit notes</h2>
 <pre><code>POST /api/method/zatca_api.api.v1.create_credit_note</code></pre>
 
+<div class="danger">
+<p><strong>A credit note must state why it was issued.</strong> ZATCA rejects one that does
+not (<code>BR-KSA-17</code>) &mdash; the reason becomes the <code>InstructionNote</code>
+element of the XML. Send <code>return_reason</code>.</p>
+<p>And <strong>do not send a future <code>posting_date</code></strong>
+(<code>BR-KSA-04</code>). Omit it and we use today, which is what you almost always want.</p>
+</div>
+
 <h3>Request</h3>
 <pre><code>{
-  &quot;external_id&quot;: &quot;DOC-CN-1785835217&quot;,
+  &quot;external_id&quot;: &quot;T1785840982-CN&quot;,
   &quot;customer&quot;: &quot;Al Rajhi Trading Est&quot;,
   &quot;company&quot;: &quot;ZATCA Test Co&quot;,
   &quot;tax_id&quot;: &quot;300000000000003&quot;,
-  &quot;posting_date&quot;: &quot;2026-08-10&quot;,
-  &quot;return_against&quot;: &quot;ACC-SINV-2026-00007&quot;,
-  &quot;remarks&quot;: &quot;Two onsite days cancelled&quot;,
+  &quot;return_against&quot;: &quot;ACC-SINV-2026-00011&quot;,
+  &quot;return_reason&quot;: &quot;Two onsite days cancelled by the customer&quot;,
   &quot;address_title&quot;: &quot;Al Rajhi Trading Est Billing&quot;,
   &quot;address_parts&quot;: {
     &quot;street&quot;: &quot;Olaya Street&quot;,
@@ -818,43 +1542,40 @@ you the exact template names.</p>
     {
       &quot;item_code&quot;: &quot;SVC-IMPL&quot;,
       &quot;qty&quot;: 2,
-      &quot;rate&quot;: 450
+      &quot;rate&quot;: 450,
+      &quot;uom&quot;: &quot;Nos&quot;
     }
   ]
 }</code></pre>
 
-<h3>Response (trimmed)</h3>
+<h3>Response</h3>
+<p>This credit note was created and submitted on the live test site, and ZATCA cleared it.</p>
 <pre><code>{
   &quot;success&quot;: true,
-  &quot;request_id&quot;: &quot;71655d5c61da&quot;,
-  &quot;timestamp&quot;: &quot;2026-08-04 12:20:33.095804&quot;,
+  &quot;request_id&quot;: &quot;df341edfa46a&quot;,
   &quot;data&quot;: {
-    &quot;action&quot;: &quot;created&quot;,
-    &quot;duplicate&quot;: false,
+    &quot;action&quot;: &quot;submitted&quot;,
     &quot;submitted&quot;: true,
-    &quot;submission_queued&quot;: false,
     &quot;invoice&quot;: {
-      &quot;invoice&quot;: &quot;ACC-SINV-2026-00008&quot;,
-      &quot;external_id&quot;: &quot;DOC-CN-1785835217&quot;,
+      &quot;invoice&quot;: &quot;ACC-SINV-2026-00017&quot;,
+      &quot;external_id&quot;: &quot;T1785840982-CN&quot;,
       &quot;docstatus&quot;: 1,
       &quot;status&quot;: &quot;Return&quot;,
       &quot;is_return&quot;: 1,
-      &quot;return_against&quot;: &quot;ACC-SINV-2026-00007&quot;,
+      &quot;return_against&quot;: &quot;ACC-SINV-2026-00011&quot;,
+      &quot;return_reason&quot;: &quot;Two onsite days cancelled by the customer&quot;,
       &quot;company&quot;: &quot;ZATCA Test Co&quot;,
       &quot;customer&quot;: &quot;Al Rajhi Trading Est&quot;,
       &quot;customer_name&quot;: &quot;Al Rajhi Trading Est&quot;,
       &quot;tax_id&quot;: &quot;300000000000003&quot;,
-      &quot;posting_date&quot;: &quot;2026-08-10&quot;,
-      &quot;posting_time&quot;: &quot;12:20:29.931318&quot;,
-      &quot;due_date&quot;: &quot;2026-08-10&quot;,
+      &quot;posting_date&quot;: &quot;2026-08-04&quot;,
+      &quot;posting_time&quot;: &quot;13:56:29.798593&quot;,
+      &quot;due_date&quot;: &quot;2026-08-04&quot;,
       &quot;currency&quot;: &quot;SAR&quot;,
       &quot;conversion_rate&quot;: 1.0,
       &quot;net_total&quot;: -900.0,
       &quot;total_taxes_and_charges&quot;: -135.0,
       &quot;grand_total&quot;: -1035.0,
-      &quot;rounded_total&quot;: -1035.0,
-      &quot;outstanding_amount&quot;: -1035.0,
-      &quot;project&quot;: null,
       &quot;items&quot;: [
         {
           &quot;idx&quot;: 1,
@@ -880,20 +1601,20 @@ you the exact template names.</p>
     },
     &quot;zatca&quot;: {
       &quot;available&quot;: true,
-      &quot;phase&quot;: &quot;Phase 1&quot;,
-      &quot;uuid&quot;: null,
-      &quot;invoice_hash&quot;: null,
-      &quot;qr_content&quot;: null,
-      &quot;qr_format&quot;: &quot;png-only&quot;,
-      &quot;integration_status&quot;: &quot;Not Applicable&quot;,
+      &quot;phase&quot;: &quot;Phase 2&quot;,
+      &quot;uuid&quot;: &quot;a96d00c8-4128-422a-84d0-e8c9f029735b&quot;,
+      &quot;invoice_counter&quot;: 7,
+      &quot;invoice_hash&quot;: &quot;nGR/5OqUiH0xhtWS4isaZ/Xm5a7pLo0ZpDEfKchbcOk=&quot;,
+      &quot;previous_invoice_hash&quot;: &quot;DysjM2JDEfI8BgsLuojE5QgiJbTYmMmDYnYKYf1rHh8=&quot;,
+      &quot;qr_content&quot;: &quot;AQ1aQVRDQSBUZXN0IENvAg8zOTk5OTk5OTk5MDAwMDMD\u2026  (404 chars, base64 TLV)&quot;,
+      &quot;qr_format&quot;: &quot;base64-tlv&quot;,
+      &quot;integration_status&quot;: &quot;Accepted with warnings&quot;,
+      &quot;invoice_type_transaction&quot;: &quot;0100000&quot;,
+      &quot;invoice_type_code&quot;: &quot;381&quot;,
       &quot;is_cleared&quot;: true,
-      &quot;is_pending&quot;: false,
-      &quot;qr_png_base64&quot;: &quot;iVBORw0KGgoAAAANSUhEUg\u2026  &lt;1568 chars of base64 PNG&gt;&quot;,
-      &quot;qr_png_data_uri&quot;: &quot;data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAa\u2026&quot;
+      &quot;is_pending&quot;: false
     }
-  },
-  &quot;warnings&quot;: [],
-  &quot;errors&quot;: []
+  }
 }</code></pre>
 
 <ul>
@@ -901,11 +1622,16 @@ you the exact template names.</p>
     work</strong> &mdash; we normalise the sign. Note the response shows
     <code>-2.0</code>.</li>
 <li><code>return_against</code> is the <strong>ERPNext invoice name</strong> we gave you
-    when we created the original. This is why you store it. ZATCA requires a credit note
-    to identify its original.</li>
-<li>The original must already be submitted.</li>
-<li>The credit note gets its own QR, and its own <code>external_id</code> &mdash; do not
-    reuse the invoice's.</li>
+    when the original was created &mdash; not your own reference. This is why you store
+    <code>data.invoice.invoice</code>.</li>
+<li><code>return_reason</code> is echoed back, so you can assert that the reason you sent is
+    the reason on the filing.</li>
+<li>The original invoice must be <strong>submitted</strong>. A credit note against a draft
+    is refused.</li>
+<li>The credit note gets its <strong>own</strong> ZATCA counter, hash and QR, and takes its
+    place in the same hash chain as every other invoice.</li>
+<li><code>external_id</code> must be unique for the credit note too &mdash; do not reuse the
+    original invoice&rsquo;s id.</li>
 </ul>
 </section>
 

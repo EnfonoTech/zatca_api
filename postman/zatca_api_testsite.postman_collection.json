@@ -649,7 +649,7 @@
         "description": "A return against `{{last_invoice}}`, captured by an earlier request.\n\nSend `qty` positive \u2014 the sign is normalised. Expect `is_return: 1`, a negative quantity and a negative net total.",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"external_id\": \"CN-{{external_id}}\",\n  \"customer\": \"{{customer_b2c}}\",\n  \"company\": \"{{company}}\",\n  \"posting_date\": \"{{posting_date}}\",\n  \"return_against\": \"{{last_invoice}}\",\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"qty\": 1,\n      \"rate\": 250\n    }\n  ]\n}",
+          "raw": "{\n  \"external_id\": \"CN-{{external_id}}\",\n  \"customer\": \"{{customer_b2c}}\",\n  \"company\": \"{{company}}\",\n  \"posting_date\": \"{{posting_date}}\",\n  \"return_against\": \"{{last_invoice}}\",\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"qty\": 1,\n      \"rate\": 250\n    }\n  ],\n  \"return_reason\": \"Two onsite days cancelled by the customer\"\n}",
           "options": {
             "raw": {
               "language": "json"

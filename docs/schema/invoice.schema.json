@@ -147,6 +147,11 @@
       "type": "string",
       "description": "The original invoice a credit note refers to. Must already be submitted. ZATCA requires a credit note to identify its original."
     },
+    "return_reason": {
+      "type": "string",
+      "maxLength": 140,
+      "description": "Why the credit or debit note was issued. ZATCA rejects a credit note that does not state a reason (BR-KSA-17); it becomes the UBL InstructionNote. Falls back to remarks, then to a default."
+    },
     "is_debit_note": {
       "type": [
         "boolean",

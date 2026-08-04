@@ -3,9 +3,9 @@
   "customer": "Al Rajhi Trading Est",
   "company": "Enfono KSA",
   "tax_id": "300000000000003",
-  "posting_date": "2026-08-10",
   "is_return": 1,
   "return_against": "ACC-SINV-2026-00051",
+  "return_reason": "Two onsite days cancelled by the customer",
   "remarks": "Two onsite days cancelled by the customer",
   "address_title": "Al Rajhi Trading Est - Billing",
   "address_parts": {

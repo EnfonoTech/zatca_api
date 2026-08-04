@@ -653,7 +653,7 @@
         "description": "Creates a return (is_return = 1) against {{last_invoice}}, set by an earlier request.\n\nItem quantities are sign-normalised, so send positive or negative figures - either works. `return_against` is optional but when given must reference a SUBMITTED invoice, which is also what ZATCA expects of a credit note.",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"external_id\": \"CN-{{external_id}}\",\n  \"customer\": \"{{customer}}\",\n  \"company\": \"{{company}}\",\n  \"posting_date\": \"{{posting_date}}\",\n  \"return_against\": \"{{last_invoice}}\",\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"qty\": 1,\n      \"rate\": 100\n    }\n  ]\n}",
+          "raw": "{\n  \"external_id\": \"CN-{{external_id}}\",\n  \"customer\": \"{{customer}}\",\n  \"company\": \"{{company}}\",\n  \"posting_date\": \"{{posting_date}}\",\n  \"return_against\": \"{{last_invoice}}\",\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"qty\": 1,\n      \"rate\": 100\n    }\n  ],\n  \"return_reason\": \"Two onsite days cancelled by the customer\"\n}",
           "options": {
             "raw": {
               "language": "json"

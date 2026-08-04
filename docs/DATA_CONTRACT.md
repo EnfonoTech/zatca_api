@@ -202,6 +202,7 @@ we reject accounts from another company rather than posting to the wrong ledger.
   "tax_id": "300000000000003",
   "is_return": 1,
   "return_against": "ACC-SINV-2026-00051",
+  "return_reason": "Two onsite days cancelled by the customer",
   "items": [{ "item_code": "SVC-ONSITE", "qty": 2, "rate": 1200 }]
 }
 ```
@@ -209,6 +210,10 @@ we reject accounts from another company rather than posting to the wrong ledger.
 - `is_return: 1`.
 - Send `qty` as the quantity being returned. Positive or negative both work — we
   normalise the sign.
+- `return_reason` states why the note was issued. **ZATCA rejects a credit note
+  with no reason** (`BR-KSA-17`); it becomes the UBL `InstructionNote`. If you omit
+  it we substitute `remarks`, then a default, so the filing still succeeds — but the
+  reason on the permanent record will not be yours.
 - `return_against` is the **ERPNext invoice name** of the original, which we returned
   to you when we created it (`data.invoice.invoice`). Store it. ZATCA requires a
   credit note to identify its original.
@@ -333,6 +338,9 @@ An empty `payloads` array is a valid response and means nothing new.
 | `postal_code` as a number, leading zero lost | ZATCA rejects the invoice |
 | `rate` sent **including** VAT | Totals overstated by 15% |
 | Negative `rate` to represent a credit | Rejected — use `is_return` |
+| `posting_date` in the future | Rejected — ZATCA forbids a future issue date (`BR-KSA-04`) |
+| Credit note with no `return_reason` | Accepted, but the reason we substitute is ours, not yours (`BR-KSA-17`) |
+| Same `item_code` on two lines with different `item_tax_template` | ZATCA rejects the filing (`BR-CO-14`/`BR-CO-15`) — give each VAT category its own item code |
 | Mixed VAT rates without `item_tax_template` | Zero-rated lines charged 15% |
 | Item codes that change between runs | Item master fills with duplicates |
 | Sending the invoice before it is final | Submitted invoices cannot be edited — ZATCA-cleared ones are legally immutable |
@@ -368,7 +376,7 @@ Full API reference: [`USER_GUIDE.md`](USER_GUIDE.md).
 - [ ] `building_number` and `postal_code` are strings
 - [ ] `rate` excludes VAT
 - [ ] Mixed VAT rates send `item_tax_template` per line
-- [ ] Credit notes send `is_return: 1` and `return_against`
+- [ ] Credit notes send `is_return: 1`, `return_against` and `return_reason`
 - [ ] Item codes and UOM list shared with us so masters can be pre-created
 - [ ] `validate_payload` returns `valid: true` with empty `errors` **and** empty `zatca_readiness.blocking`, for at least: one B2B invoice, one B2C invoice, one credit note, one mixed-VAT invoice
 - [ ] Retry logic re-sends the same `external_id` rather than generating a new one

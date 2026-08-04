@@ -320,7 +320,8 @@ Response `data`:
 | `clearance_wait` | Only when *Wait For Clearance* > 0 |
 
 `data.invoice` carries `invoice` (ERPNext name), `external_id`, `docstatus`,
-`status`, `is_return`, `return_against`, `company`, `customer`, `customer_name`,
+`status`, `is_return`, `return_against`, `return_reason`, `company`, `customer`,
+`customer_name`,
 `tax_id`, `posting_date`, `posting_time`, `due_date`, `currency`,
 `conversion_rate`, `net_total`, `total_taxes_and_charges`, `grand_total`,
 `rounded_total`, `outstanding_amount`, `project`, plus `items[]` and `taxes[]`.
@@ -331,6 +332,12 @@ Same payload with `is_return` implied. Quantities are **sign-normalised** — se
 positive or negative, either works. `return_against` is optional but, when
 supplied, must reference a **submitted** Sales Invoice (ZATCA requires a credit
 note to identify its original).
+
+Send `return_reason`. ZATCA rejects a credit or debit note that does not state
+why it was issued (`BR-KSA-17`) — the text becomes the UBL `InstructionNote`.
+Absent it, `remarks` is used, then a `"Return of goods"` default, so the filing
+still clears; but the reason on the permanent record is then ours, not yours.
+Verified against the Phase 2 sandbox: without a reason, `HTTP 400 Rejected`.
 
 ### `get_invoice` / `get_status`
 
@@ -394,7 +401,7 @@ parentheses.
 | `company` | `company_name` | Falls back to Default Company. |
 | `tax_id` | `vat_number`, `vat_registration_number`, `buyer_vat` | Buyer VAT. Also written to `Customer.custom_vat_registration_number` — see §10. |
 | `buyer_id_type` / `buyer_id_value` | `crn`, `commercial_registration` | ZATCA codes: `TIN CRN MOM MLS SAG NAT GCC IQA PAS OTH`. Use when the buyer has no VAT number. |
-| `posting_date` | `invoice_date`, `date` | Defaults to today. |
+| `posting_date` | `invoice_date`, `date` | Defaults to today. **Never in the future** — ZATCA forbids a future issue date (`BR-KSA-04`), so a future date is refused before anything is written. Backdating is fine. |
 | `posting_time` | `invoice_time`, `time` | Feeds the ZATCA QR timestamp. |
 | `due_date` | `payment_due_date` | |
 | `currency` / `conversion_rate` | `currency_code`, `exchange_rate` | |
@@ -410,6 +417,7 @@ parentheses.
 | `payment_amount` | `paid_amount` | Amount on the payments row. Defaults to `0`, so declaring a payment means does not mark the invoice paid. |
 | `is_return` | `is_credit_note` | |
 | `return_against` | `against_invoice`, `original_invoice` | Must be submitted. |
+| `return_reason` | `reason`, `credit_note_reason` | Why the note was issued. **ZATCA requires a reason** (`BR-KSA-17`). Max 140 chars. |
 | `is_debit_note` | | |
 | `submit` | `auto_submit`, `do_submit` | Overrides the Auto Submit setting for this request. |
 
