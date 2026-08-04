@@ -73,6 +73,7 @@ def run(with_api_keys: int = 1):
 
     result['prerequisites'] = _ensure_erpnext_masters()
     result['company'] = _ensure_company()
+    result['company_repair'] = _repair_company()
     result['currency_defaults'] = _ensure_currency_defaults()
     result['vat_account'] = _ensure_vat_account()
     result['tax_template'] = _ensure_tax_template(result['vat_account'])
@@ -212,7 +213,6 @@ def _minimal_masters_fallback(reason: str) -> dict:
 
 def _ensure_company() -> str:
     if frappe.db.exists('Company', COMPANY):
-        _repair_company()
         return COMPANY
 
     doc = frappe.new_doc('Company')
@@ -224,19 +224,57 @@ def _ensure_company() -> str:
     return doc.name
 
 
-def _repair_company() -> None:
+def _repair_company() -> dict:
     """Finish a Company whose insert aborted part-way.
 
-    A Company created before Warehouse Type existed has no default warehouses. Calling
-    erpnext's own creator is better than hand-building them.
-    """
-    if frappe.db.count('Warehouse', {'company': COMPANY}):
-        return
+    ``Company.on_update`` builds the chart of accounts, cost centers, warehouses and
+    default accounts in sequence. When an early step throws -- e.g. missing Warehouse
+    Type -- the Company row still exists but the later steps never ran, leaving no cost
+    center and no default income account. Every invoice then fails with
+    "Row #1: Cost Center None does not belong to company", which points at the invoice
+    rather than at the half-built company.
 
+    Each of erpnext's own creators is called rather than hand-building the records.
+    """
     doc = frappe.get_doc('Company', COMPANY)
-    if hasattr(doc, 'create_default_warehouses'):
+    repaired = []
+
+    if not frappe.db.count('Warehouse', {'company': COMPANY}) and hasattr(doc, 'create_default_warehouses'):
         doc.create_default_warehouses()
+        repaired.append('warehouses')
+
+    if not frappe.db.count('Cost Center', {'company': COMPANY}) and hasattr(
+        doc, 'create_default_cost_center'
+    ):
+        doc.create_default_cost_center()
+        repaired.append('cost_centers')
+
+    # create_default_cost_center writes the records but leaves the Company pointers
+    # unset when it runs outside the normal insert flow.
+    if not doc.cost_center:
+        main = frappe.db.get_value(
+            'Cost Center', {'company': COMPANY, 'is_group': 0, 'cost_center_name': 'Main'}, 'name'
+        ) or frappe.db.get_value('Cost Center', {'company': COMPANY, 'is_group': 0}, 'name')
+        if main:
+            doc.cost_center = main
+            doc.round_off_cost_center = doc.round_off_cost_center or main
+            repaired.append(f'cost_center={main}')
+
+    if not doc.default_income_account and hasattr(doc, 'set_default_accounts'):
+        doc.set_default_accounts()
+        repaired.append('default_accounts')
+
+    if repaired:
+        doc.flags.ignore_permissions = True
+        doc.flags.ignore_mandatory = True
+        doc.save()
         frappe.db.commit()
+
+    return {
+        'repaired': repaired or 'nothing to repair',
+        'cost_center': frappe.db.get_value('Company', COMPANY, 'cost_center'),
+        'default_income_account': frappe.db.get_value('Company', COMPANY, 'default_income_account'),
+    }
 
 
 def _ensure_currency_defaults() -> dict:
