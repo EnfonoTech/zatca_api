@@ -82,7 +82,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.ping"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.ping",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.ping"
+          ]
         },
         "description": "Confirms the key pair works, the custom fields are migrated, and which ZATCA phase the seeded company resolves to.\n\nOn this test site expect: `custom_fields_installed: true`, `ksa_compliance 0.58.0`, and `ZATCA Test Co -> Phase 1`.\n\nIf this fails with 403, check `api_key` / `api_secret` in the environment. If it fails with \"App zatca_api is not installed\", `base_url` is reaching a different site on the same server \u2014 see the collection description."
       },
@@ -136,7 +144,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.validate_payload"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.validate_payload",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.validate_payload"
+          ]
         },
         "description": "Writes nothing. Expect `valid: true` and real totals: 2 x 250 = 500 net, +75 VAT, 575 SAR.",
         "body": {
@@ -207,7 +223,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.validate_payload"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.validate_payload",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.validate_payload"
+          ]
         },
         "description": "A buyer VAT number makes this a ZATCA **standard** invoice, and a standard invoice requires a complete buyer address. Expect `valid: false` with a per-field list.\n\nThis mirrors `ksa_compliance`, which validates the buyer address whenever the invoice type is Standard and throws outright when a B2B customer has no address.",
         "body": {
@@ -273,7 +297,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.create_invoice"
+          ]
         },
         "description": "Creates and submits, then returns the ZATCA Phase 1 QR as a base64 PNG.\n\nExpect `grand_total: 575`, `zatca.available: true`, `phase: Phase 1`, and a QR of roughly 1100-1600 bytes. Warnings about the buyer address are expected here \u2014 this is a B2C (simplified) invoice, which needs none.\n\nThe QR is stored in `{{last_qr_png}}`. To view it, paste `data:image/png;base64,<value>` into a browser address bar.",
         "body": {
@@ -355,7 +387,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.create_invoice"
+          ]
         },
         "description": "Deliberately does NOT regenerate `external_id`, so it re-sends the one request 04 used, with a different quantity.\n\nExpect `action: duplicate`, `duplicate: true`, and the **original** total unchanged. A submitted invoice is never re-posted.",
         "body": {
@@ -414,7 +454,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.create_invoice"
+          ]
         },
         "description": "A ZATCA **standard** invoice: buyer VAT number plus the five required address fields.\n\nExpect `grand_total: 5175` (10 x 450 = 4500 + 675 VAT) and **empty warnings** \u2014 that empty array is the signal the buyer data is ZATCA-complete.\n\nThe `tax_id` is also written to `Customer.custom_vat_registration_number`, which is the field `ksa_compliance` reads to decide standard vs simplified.",
         "body": {
@@ -496,7 +544,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.create_invoice"
+          ]
         },
         "description": "One standard-rated line and one zero-rated line, using the Item Tax Templates the seeder created.\n\nExpect VAT on the standard line only: net 2000, VAT **150** (not 300), grand 2150. If VAT comes back as 300, per-line tax templates are being ignored and zero-rated lines are being charged.",
         "body": {
@@ -580,7 +636,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_credit_note"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_credit_note",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.create_credit_note"
+          ]
         },
         "description": "A return against `{{last_invoice}}`, captured by an earlier request.\n\nSend `qty` positive \u2014 the sign is normalised. Expect `is_return: 1`, a negative quantity and a negative net total.",
         "body": {
@@ -635,7 +699,21 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.get_invoice?external_id={{external_id}}"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.get_invoice?external_id={{external_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.get_invoice"
+          ],
+          "query": [
+            {
+              "key": "external_id",
+              "value": "{{external_id}}"
+            }
+          ]
         },
         "description": "Fetch by your own reference. Add `&include_xml=1` for the signed UBL XML (Phase 2 only)."
       },
@@ -679,7 +757,21 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.get_status?external_id={{external_id}}"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.get_status?external_id={{external_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.get_status"
+          ],
+          "query": [
+            {
+              "key": "external_id",
+              "value": "{{external_id}}"
+            }
+          ]
         },
         "description": "The QR, UUID and hash are already in the create response; only `integration_status` is asynchronous. Poll this rather than holding a request open.\n\nOn this site expect `Not Applicable` \u2014 Phase 1 has no filing step. On a Phase 2 site you would see Ready For Batch, then Accepted / Rejected."
       },
@@ -724,7 +816,33 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.list_invoices?company={{company}}&docstatus=1&limit=10&start=0"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.list_invoices?company={{company}}&docstatus=1&limit=10&start=0",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.list_invoices"
+          ],
+          "query": [
+            {
+              "key": "company",
+              "value": "{{company}}"
+            },
+            {
+              "key": "docstatus",
+              "value": "1"
+            },
+            {
+              "key": "limit",
+              "value": "10"
+            },
+            {
+              "key": "start",
+              "value": "0"
+            }
+          ]
         },
         "description": "Paginated. `limit` caps at 200, or 50 when `include_qr=1`."
       },
@@ -773,7 +891,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.create_invoice"
+          ]
         },
         "description": "Expect HTTP **400**, `success: false`, `errors[0].code = \"validation_error\"` and the missing field names in `details.missing`. Branch on the code, never on the message text.",
         "body": {
@@ -823,7 +949,21 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.get_invoice?external_id=DOES-NOT-EXIST-999"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.get_invoice?external_id=DOES-NOT-EXIST-999",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.get_invoice"
+          ],
+          "query": [
+            {
+              "key": "external_id",
+              "value": "DOES-NOT-EXIST-999"
+            }
+          ]
         },
         "description": "Expect HTTP **404** and `errors[0].code = \"not_found\"`."
       },

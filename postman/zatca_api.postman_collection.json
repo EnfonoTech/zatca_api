@@ -93,7 +93,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.ping"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.ping",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.ping"
+          ]
         },
         "description": "Health and capability probe. Confirms authentication works, the custom fields are migrated, whether ksa_compliance is installed, and which ZATCA phase each company resolves to. Run this first whenever an integration misbehaves."
       },
@@ -144,7 +152,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.validate_payload"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.validate_payload",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.validate_payload"
+          ]
         },
         "description": "The onboarding endpoint. **Nothing is written to the database.**\n\nPOST exactly the JSON you intend to send for real. You get back every missing or invalid field, the real ERPNext totals, which master records would be created, and whether the invoice would file with ZATCA as *standard* or *simplified*.\n\nRun this until `valid` is true, `errors` is empty and `zatca_readiness.blocking` is empty. Only then send a real invoice.\n\nCheck the Postman console for the full breakdown. Add `?document_type=Credit Note` to validate a return.",
         "body": {
@@ -220,7 +236,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.validate_payload"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.validate_payload",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.validate_payload"
+          ]
         },
         "description": "The same endpoint with a 3-digit building number and a 4-digit postal code \u2014 both ZATCA rejections.\n\nExpect `zatca_readiness.blocking` to be populated, and the tests below to fail on purpose. This shows you what a problem looks like *before* ZATCA rejects a real invoice. Read the console output.",
         "body": {
@@ -282,7 +306,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.create_invoice"
+          ]
         },
         "description": "The smallest payload that works. Submits the invoice (per ZATCA API Settings) and returns the QR in the same response.\n\nA ZATCA QR only exists for a SUBMITTED invoice. If `zatca.available` is false, read `zatca.reason`.",
         "body": {
@@ -364,7 +396,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.create_invoice"
+          ]
         },
         "description": "Everything a ZATCA Phase 2 STANDARD (B2B) invoice needs.\n\nKey points:\n- `tax_id` is mirrored onto Customer.custom_vat_registration_number, which is the field ksa_compliance reads to decide standard vs simplified. Sending only a bare tax_id elsewhere would file a B2B sale as simplified.\n- `address_parts` supplies the buyer street, building number (4 digits), district, city and postal code (5 digits) that ZATCA requires. Missing parts come back in `warnings`.\n- `item_tax_template` per line keeps mixed standard/zero-rated/exempt lines correct.\n- Set {{item_tax_template}} and {{vat_account}} in the environment, or delete those keys.",
         "body": {
@@ -446,7 +486,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.create_invoice"
+          ]
         },
         "description": "The same endpoint accepting an upstream system's own key names.\n\nKeys are matched case- and separator-insensitively, so \"Naming Series\", \"Customer Name\", \"Item_Code\" and \"Address Display\" all resolve with no configuration. Free-text address parsing must be enabled in ZATCA API Settings for `Address Display` to be broken into ZATCA parts.",
         "body": {
@@ -528,7 +576,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.create_invoice"
+          ]
         },
         "description": "Send the SAME external_id twice. This request deliberately does NOT regenerate {{external_id}}, so it re-sends the previous one.\n\nExpected: `action` = \"updated\" while the invoice is still Draft, or \"duplicate\" with `duplicate` = true once it is submitted. A submitted invoice is never re-posted.",
         "body": {
@@ -584,7 +640,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_credit_note"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_credit_note",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.create_credit_note"
+          ]
         },
         "description": "Creates a return (is_return = 1) against {{last_invoice}}, set by an earlier request.\n\nItem quantities are sign-normalised, so send positive or negative figures - either works. `return_against` is optional but when given must reference a SUBMITTED invoice, which is also what ZATCA expects of a credit note.",
         "body": {
@@ -641,7 +705,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.create_invoice"
+          ]
         },
         "description": "Overrides the Auto Submit setting for this one request. The invoice stays in Draft, so no QR is produced yet - `zatca.available` will be false with a reason saying so. Submit it later with request 08.",
         "body": {
@@ -698,7 +770,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.submit_invoice"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.submit_invoice",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.submit_invoice"
+          ]
         },
         "description": "Submits an existing draft and returns the QR. Use this for the Queued submit mode, or after request 07. Idempotent: submitting an already-submitted invoice succeeds.",
         "body": {
@@ -750,6 +830,14 @@
         ],
         "url": {
           "raw": "{{base_url}}/api/method/zatca_api.api.v1.get_invoice?external_id={{external_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.get_invoice"
+          ],
           "query": [
             {
               "key": "external_id",
@@ -798,6 +886,14 @@
         ],
         "url": {
           "raw": "{{base_url}}/api/method/zatca_api.api.v1.get_status?external_id={{external_id}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.get_status"
+          ],
           "query": [
             {
               "key": "external_id",
@@ -847,6 +943,14 @@
         ],
         "url": {
           "raw": "{{base_url}}/api/method/zatca_api.api.v1.list_invoices?company={{company}}&docstatus=1&limit=10&start=0&include_qr=0",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.list_invoices"
+          ],
           "query": [
             {
               "key": "company",
@@ -912,6 +1016,14 @@
         ],
         "url": {
           "raw": "{{base_url}}/api/method/zatca_api.api.v1.list_invoices?company={{company}}&docstatus=1&integration_status=Rejected&limit=50",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.list_invoices"
+          ],
           "query": [
             {
               "key": "company",
@@ -975,7 +1087,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.resubmit_to_zatca"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.resubmit_to_zatca",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.resubmit_to_zatca"
+          ]
         },
         "description": "Retry a filing that came back Rejected or Resend.\n\nThis delegates to ksa_compliance's own fix_rejection, which creates a fresh Sales Invoice Additional Fields document. Re-signing outside that routine would break the previous-invoice-hash chain for every later invoice. An already-Accepted invoice is skipped rather than refiled.",
         "body": {
@@ -1029,7 +1149,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.pull_now"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.pull_now",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.pull_now"
+          ]
         },
         "description": "Optional pull mode: fetch invoices from an upstream endpoint configured in ZATCA API Settings > Pull Sources, instead of waiting for the 15-minute cron.\n\nOmit `source` to run every enabled source. Push mode (requests 02-04) is preferred because it can return the QR synchronously.",
         "body": {
@@ -1083,7 +1211,15 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice"
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.create_invoice"
+          ]
         },
         "description": "Shows the error envelope. Expect HTTP 400, `success` = false, and `errors[0].code` = \"validation_error\" with the missing field names in `details.missing`.\n\nBranch on `code`, never on message text - messages are translated.",
         "body": {
@@ -1131,6 +1267,14 @@
         ],
         "url": {
           "raw": "{{base_url}}/api/method/zatca_api.api.v1.get_invoice?external_id=DOES-NOT-EXIST-12345",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "api",
+            "method",
+            "zatca_api.api.v1.get_invoice"
+          ],
           "query": [
             {
               "key": "external_id",
