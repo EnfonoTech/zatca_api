@@ -67,28 +67,44 @@ def run(otp: str = SANDBOX_OTP, fatoora_server: str = SANDBOX):
 
 
 def _ensure_cli() -> dict:
-    """Install the ZATCA CLI + JRE if they are not already present.
+    """Install the ZATCA CLI + JRE if absent, and return **absolute** paths to both.
 
-    Paths are per-site (``<site>/zatca-tools/``), not bench-wide, so each site needs its
-    own copy.
+    Two things this has to get right:
+
+    * Always return ``jre_path`` as well as ``cli_path``. Returning only the CLI leaves
+      ``java_home`` unset and signing dies with
+      ``ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH``.
+    * Resolve both to absolute paths. ``get_zatca_tool_path()`` is site-relative
+      (``./<site>/zatca-tools/...``), which resolves differently depending on the working
+      directory of whatever process runs the CLI -- a background worker is not the bench
+      root.
+
+    Paths are per-site, so every site needs its own copy.
     """
-    from ksa_compliance import zatca_cli
-
-    tool_path = zatca_cli.get_zatca_tool_path()
-    existing_cli = frappe.db.get_value('ZATCA Business Settings', {'company': COMPANY}, 'zatca_cli_path')
-    if existing_cli and _exists(existing_cli):
-        return {'status': 'already installed', 'cli_path': existing_cli}
-
     import glob
     import os
 
-    found = glob.glob(os.path.join(tool_path, 'zatca-cli-*', 'bin', 'zatca-cli'))
-    jres = glob.glob(os.path.join(tool_path, 'jdk-*jre'))
-    if found and jres:
-        return {'status': 'found on disk', 'cli_path': found[0], 'jre_path': jres[0]}
+    from ksa_compliance import zatca_cli
 
-    paths = zatca_cli.setup(None, None)
-    return {'status': 'downloaded', **paths}
+    tool_path = os.path.abspath(zatca_cli.get_zatca_tool_path())
+
+    def discover() -> tuple:
+        cli = sorted(glob.glob(os.path.join(tool_path, 'zatca-cli-*', 'bin', 'zatca-cli')))
+        jre = sorted(glob.glob(os.path.join(tool_path, 'jdk-*jre')))
+        return (os.path.abspath(cli[-1]) if cli else None, os.path.abspath(jre[-1]) if jre else None)
+
+    cli_path, jre_path = discover()
+    if cli_path and jre_path:
+        return {'status': 'already installed', 'cli_path': cli_path, 'jre_path': jre_path}
+
+    zatca_cli.setup(None, None)
+    cli_path, jre_path = discover()
+    if not (cli_path and jre_path):
+        frappe.throw(
+            f'ZATCA CLI setup did not produce both a CLI and a JRE under {tool_path} '
+            f'(cli={cli_path}, jre={jre_path})'
+        )
+    return {'status': 'downloaded', 'cli_path': cli_path, 'jre_path': jre_path}
 
 
 def _exists(path: str) -> bool:
