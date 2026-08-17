@@ -159,10 +159,37 @@ class ZATCAAPITestCase(FrappeTestCase):
     remaining tests depend on. Per-test data is left to that rollback.
     """
 
+    # ZATCA API Settings is a Single, so there is one shared row and pointing it at the
+    # test company is a site-wide change. setUpClass has to commit (see the class
+    # docstring), and FrappeTestCase's rollback cannot undo a commit -- so without this
+    # the settings stay pointed at _ZAPI Test Co after the run finishes. On a real site
+    # that silently redirects every later request that omits `company` to a throwaway
+    # company with no ZATCA configuration: invoices get created and never filed.
+    _saved_settings = None
+    _SAVED_FIELDS = (
+        'default_company',
+        'enabled',
+        'auto_submit_invoices',
+        'submit_mode',
+        'create_missing_customers',
+        'create_missing_items',
+        'create_missing_uoms',
+        'update_existing_drafts',
+        'enforce_b2b_address',
+        'log_requests',
+        'wait_for_zatca_seconds',
+    )
+
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
         frappe.set_user('Administrator')
+
+        settings = frappe.get_single('ZATCA API Settings')
+        ZATCAAPITestCase._saved_settings = {
+            field: settings.get(field) for field in cls._SAVED_FIELDS
+        }
+
         _ensure_company()
         _ensure_item(TEST_ITEM)
         _ensure_item(TEST_ITEM_ZERO)
@@ -170,6 +197,19 @@ class ZATCAAPITestCase(FrappeTestCase):
         _ensure_default_tax_template()
         _configure_settings()
         frappe.db.commit()
+
+    @classmethod
+    def tearDownClass(cls):
+        saved = ZATCAAPITestCase._saved_settings
+        if saved:
+            settings = frappe.get_single('ZATCA API Settings')
+            for field, value in saved.items():
+                setattr(settings, field, value)
+            settings.flags.ignore_permissions = True
+            settings.save()
+            frappe.db.commit()
+            frappe.clear_cache(doctype='ZATCA API Settings')
+        super().tearDownClass()
 
     def setUp(self):
         frappe.set_user('Administrator')

@@ -70,6 +70,7 @@ ITEM_TAX_TEMPLATES = {
     'KSA Exempt': (0, 'Exempt from Tax || Financial services mentioned in Article 29 of the VAT Regulations'),
 }
 API_USER = 'zatca-api@enfono.com'
+API_USER_ROLES = ('Accounts User',)
 
 # erpnext ships these as fixtures; a site whose after_install did not complete has none.
 WAREHOUSE_TYPES = ('Transit',)
@@ -748,7 +749,16 @@ def _ensure_api_user() -> dict:
         doc.last_name = 'API'
         doc.send_welcome_email = 0
         doc.flags.no_welcome_mail = True
-        for role in ('Accounts Manager', 'Accounts User', 'System Manager'):
+        # Least privilege. The only permission this app ever checks is
+        # has_permission('Sales Invoice', create|submit|read) in utils/auth.guard_request;
+        # every master write (Customer, Item, Address, UOM, Project) goes through
+        # ignore_permissions, so no role is needed for those. Accounts User grants
+        # read/write/create/submit on Sales Invoice, which is exactly the surface.
+        #
+        # It previously also carried Accounts Manager and System Manager. A leaked key is
+        # then not "someone can post invoices" but "someone owns the site", and the whole
+        # 14-request collection passes with Accounts User alone -- verified end to end.
+        for role in API_USER_ROLES:
             if frappe.db.exists('Role', role):
                 doc.append('roles', {'role': role})
         doc.insert(ignore_permissions=True)
