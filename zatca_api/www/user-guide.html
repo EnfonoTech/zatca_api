@@ -189,10 +189,25 @@ access.</strong></p>
 user &rarr; <strong>Settings</strong> &rarr; <strong>API Access</strong> &rarr;
 <strong>Generate Keys</strong>. The secret is shown once.</p>
 <pre><code>Authorization: token &lt;api_key&gt;:&lt;api_secret&gt;</code></pre>
-<p>The user needs <code>create</code> and <code>submit</code> on
-<strong>Sales Invoice</strong>. The <code>Accounts Manager</code> role covers
-everything. Permissions are checked against <em>this user</em> and are never
-escalated.</p>
+<p>The user needs <code>create</code>, <code>submit</code> and <code>read</code> on
+<strong>Sales Invoice</strong> &mdash; nothing else. <strong><code>Accounts User</code> is
+sufficient</strong> and is what we recommend: it grants exactly that. Every master this app
+creates on your behalf (Customer, Item, Address, UOM, Project) is written with elevated
+rights internally, so no role is needed for those. Permissions are checked against
+<em>this user</em> and are never escalated.</p>
+<div class="warn">
+<p><strong>Do not give the integration user <code>System Manager</code>.</strong> A leaked
+key then stops being &ldquo;someone can post invoices&rdquo; and becomes &ldquo;someone owns
+the site&rdquo; &mdash; users, settings and all data. Verified: the full API surface works
+under <code>Accounts User</code> alone.</p>
+<p><strong>Never open that user in the desk and press Save.</strong>
+<code>api_secret</code> is a Password field, so the form loads it masked and saving writes
+the mask back, silently destroying the secret. Every request then fails with
+<code>401 AuthenticationError</code> and the old value is unrecoverable. Change roles from
+the Role Profile or a script, and issue a new secret deliberately with
+<code>bench --site &lt;site&gt; execute zatca_api.setup_test_site.rotate_api_secret</code>,
+which is also the way to revoke a provider's access.</p>
+</div>
 
 <h3>Optional extra guards</h3>
 <p>Under <strong>ZATCA API Settings &rarr; Security</strong>:</p>
@@ -218,19 +233,60 @@ migrated, and which ZATCA phase each company resolves to.</p>
 <p><code>custom_fields_installed</code> must be <code>true</code>. If not, run
 <code>bench --site &lt;site&gt; migrate</code>.</p>
 
-<p><strong>2. Create an invoice.</strong></p>
+<p><strong>2. Create an invoice.</strong> There are two shapes, and
+<strong><code>tax_id</code> is what separates them</strong> &mdash; not the customer's name,
+not a flag you set.</p>
+
+<h3>B2C &mdash; simplified</h3>
+<p>A consumer sale. No buyer VAT number, no address needed. Filed as
+<code>0200000</code> and <em>reported</em> to ZATCA after the fact.</p>
+<pre><code>curl -X POST "https://&lt;site&gt;/api/method/zatca_api.api.v1.create_invoice" \
+  -H "Authorization: token $API_KEY:$API_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "external_id": "POS-2026-0001",
+    "customer": "Walk-in Customer",
+    "company": "Enfono KSA",
+    "items": [
+      { "item_code": "SVC-01", "qty": 2, "rate": 350 }
+    ]
+  }'</code></pre>
+
+<h3>B2B &mdash; standard</h3>
+<p>A sale to a registered business. The buyer VAT number makes it
+<code>0100000</code>, <em>cleared</em> by ZATCA before you may issue it &mdash; and that in
+turn makes a complete buyer address mandatory.</p>
 <pre><code>curl -X POST "https://&lt;site&gt;/api/method/zatca_api.api.v1.create_invoice" \
   -H "Authorization: token $API_KEY:$API_SECRET" \
   -H "Content-Type: application/json" \
   -d '{
     "external_id": "INV-2026-0001",
-    "customer": "Al Rajhi Trading",
+    "customer": "Al Rajhi Trading Est",
     "company": "Enfono KSA",
-    "posting_date": "2026-08-04",
+    "tax_id": "300000000000003",
+    "po_no": "PO-9931",
+    "address_title": "Al Rajhi Trading Est Billing",
+    "address_parts": {
+      "street": "Olaya Street",
+      "building_number": "4521",
+      "district": "Al Murabba",
+      "city": "Riyadh",
+      "postal_code": "12613",
+      "country": "Saudi Arabia"
+    },
     "items": [
-      { "item_code": "SVC-01", "qty": 2, "rate": 500 }
+      { "item_code": "SVC-01", "qty": 4, "rate": 900 }
     ]
   }'</code></pre>
+
+<div class="danger">
+<p><strong>Omitting <code>tax_id</code> on a business sale is a compliance defect that
+throws no error.</strong> The invoice is accepted, the QR is returned, everything looks
+right &mdash; and it has been filed as a consumer sale. Check
+<code>data.zatca.invoice_type_transaction</code>: <code>0100000</code> means standard,
+<code>0200000</code> means simplified. If you sell to businesses, assert on that value in
+your own tests.</p>
+</div>
 
 <p><strong>3. Read the QR</strong> from <code>message.data.zatca</code>, and poll
 <code>get_status</code> for the ZATCA filing outcome.</p>
