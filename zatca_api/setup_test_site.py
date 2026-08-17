@@ -758,7 +758,46 @@ def _ensure_api_user() -> dict:
         api_key = frappe.generate_hash(length=15)
         frappe.db.set_value('User', API_USER, 'api_key', api_key)
 
+    # Only mint a secret when the user has none. Regenerating unconditionally made a
+    # re-run of this "idempotent" seeder silently revoke a working integration's
+    # credentials -- the caller starts getting 401 AuthenticationError with no clue why,
+    # and the old secret is unrecoverable. Rotation must be a deliberate act, so it lives
+    # in rotate_api_secret() below.
+    existing_secret = frappe.utils.password.get_decrypted_password(
+        'User', API_USER, 'api_secret', raise_exception=False
+    )
+    if existing_secret:
+        return {'user': API_USER, 'api_key': api_key, 'api_secret': '(unchanged)'}
+
     api_secret = frappe.generate_hash(length=15)
     frappe.utils.password.set_encrypted_password('User', API_USER, api_secret, 'api_secret')
 
     return {'user': API_USER, 'api_key': api_key, 'api_secret': api_secret}
+
+
+def rotate_api_secret(user: str = API_USER) -> dict:
+    """Issue a new API secret, invalidating the current one.
+
+        bench --site <site> execute zatca_api.setup_test_site.rotate_api_secret
+
+    This is the revocation path: whoever holds the old secret stops working immediately.
+    The new secret is returned once and cannot be read back afterwards.
+    """
+    if not frappe.db.exists('User', user):
+        frappe.throw(f'User {user} does not exist.')
+
+    api_secret = frappe.generate_hash(length=15)
+    frappe.utils.password.set_encrypted_password('User', user, api_secret, 'api_secret')
+    frappe.db.commit()
+
+    result = {
+        'user': user,
+        'api_key': cstr(frappe.db.get_value('User', user, 'api_key')),
+        'api_secret': api_secret,
+        'note': 'The previous secret is now invalid. This value is not recoverable later.',
+    }
+    print('=' * 70)
+    for key, value in result.items():
+        print(f'  {key:12s} {value}')
+    print('=' * 70)
+    return result
