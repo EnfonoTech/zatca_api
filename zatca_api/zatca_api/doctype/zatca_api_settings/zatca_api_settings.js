@@ -84,6 +84,11 @@ function render_banner(frm) {
 function run_ping(frm) {
 	frappe.call({
 		method: 'zatca_api.api.v1.ping',
+		// ping is declared @frappe.whitelist(methods=['GET']). frappe.call POSTs by
+		// default, and frappe's is_valid_http_method rejects a verb the endpoint does not
+		// declare with a bare "Not permitted" PermissionError -- which reads like a
+		// missing role rather than a wrong verb. Keep this in step with the decorator.
+		type: 'GET',
 		freeze: true,
 		freeze_message: __('Checking readiness...'),
 		callback: (r) => {
