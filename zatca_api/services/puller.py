@@ -200,9 +200,12 @@ def import_source(source_name: str) -> dict:
             if result.action == 'duplicate':
                 results['skipped'] += 1
             else:
-                results['imported'] += 1
                 if cint(source.auto_submit) and result.docstatus == 0:
                     invoice_service.submit_invoice(result.name)
+                # Counted only once the submit has also succeeded. Incrementing before it
+                # tallied a failed submit as BOTH imported and failed, so the totals could
+                # exceed `fetched` and a partial failure read as a clean run.
+                results['imported'] += 1
 
             frappe.db.commit()
 

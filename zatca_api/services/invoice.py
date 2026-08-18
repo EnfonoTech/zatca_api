@@ -137,6 +137,8 @@ def _resolve_taxes(payload: dict, company: str, doc) -> list:
             if charge_type == 'Actual':
                 row['tax_amount'] = flt(tax.get('tax_amount'))
             rows.append(row)
+
+        _require_zatca_tax_category(payload, company)
         return rows
 
     template = payload.get('tax_template')
@@ -180,6 +182,44 @@ def _resolve_taxes(payload: dict, company: str, doc) -> list:
         )
 
     return []
+
+
+def _require_zatca_tax_category(payload: dict, company: str) -> None:
+    """Refuse explicit ``taxes`` that give ZATCA no way to derive a VAT category.
+
+    An explicit ``taxes`` array populates the invoice's tax rows but leaves
+    ``taxes_and_charges`` -- the *named template* link -- empty, because the caller named
+    accounts rather than a template. ksa_compliance's ``create_tax_categories`` needs one of
+    the two to classify each line, and with neither it throws during submit:
+
+        Please Include Sales Taxes and Charges Template on invoice
+        Or include Item Tax Template on <item name>
+
+    That surfaces after the invoice is already inserted, from another app, naming an item
+    rather than the payload field at fault. Refusing here instead keeps the failure in the
+    caller's own terms and writes nothing.
+
+    Per-line ``item_tax_template`` satisfies it, which is why a mixed-rate payload sending
+    explicit taxes is fine.
+    """
+    from zatca_api.services.zatca import get_phase_for_company
+
+    if get_phase_for_company(company) == 'None':
+        return
+
+    if any(item.get('item_tax_template') for item in payload.get('items') or []):
+        return
+
+    raise PayloadError(
+        _(
+            'ZATCA e-invoicing is enabled for company {0}, so every line needs a VAT '
+            'category. An explicit "taxes" array alone does not provide one. Either send '
+            '"item_tax_template" on every item, or send "tax_template" naming a Sales Taxes '
+            'and Charges Template instead of the "taxes" array, or omit both and let the '
+            "company's default template apply."
+        ).format(company),
+        {'field': 'taxes', 'company': company, 'requires': 'item_tax_template or tax_template'},
+    )
 
 
 def _rows_from_template(template_name: str) -> list:
