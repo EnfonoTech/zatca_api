@@ -475,28 +475,65 @@ already had it &mdash; see retries below).</p>
 answer, because filing the invoice with ZATCA runs in a background job after the
 response has gone out.</p>
 <p>So: <strong>take the QR from step 2, then call back here for the verdict.</strong></p>
+<div class="note">
+<p><strong>You never need our invoice number.</strong> Every read endpoint accepts
+<code>external_id</code> &mdash; the reference <em>you</em> sent &mdash; in place of
+<code>invoice</code>:</p>
+<pre><code>GET .../get_status?external_id=YOUR-REFERENCE     &rarr; the verdict
+GET .../get_invoice?external_id=YOUR-REFERENCE    &rarr; the whole invoice, items, taxes, QR</code></pre>
+<p>Both return our <code>invoice</code> name in the response too, so you can store it if you
+want it &mdash; but nothing requires you to. Keep your own id stable and it is the only key
+you need.</p>
+</div>
+
 
 <h3>Response</h3>
 <pre><code>{
   &quot;success&quot;: true,
-  &quot;request_id&quot;: &quot;22299e525f65&quot;,
-  &quot;timestamp&quot;: &quot;2026-08-04 12:20:28.922466&quot;,
+  &quot;request_id&quot;: &quot;acaa93260169&quot;,
   &quot;data&quot;: {
-    &quot;invoice&quot;: &quot;ACC-SINV-2026-00007&quot;,
+    &quot;invoice&quot;: &quot;ACC-SINV-2026-00045&quot;,
     &quot;docstatus&quot;: 1,
-    &quot;status&quot;: &quot;Unpaid&quot;,
+    &quot;status&quot;: &quot;Overdue&quot;,
     &quot;zatca&quot;: {
       &quot;available&quot;: true,
-      &quot;phase&quot;: &quot;Phase 1&quot;,
-      &quot;uuid&quot;: null,
-      &quot;integration_status&quot;: &quot;Not Applicable&quot;,
+      &quot;phase&quot;: &quot;Phase 2&quot;,
+      &quot;uuid&quot;: &quot;667b12f1-104f-4536-980a-b3731dc0587d&quot;,
+      &quot;integration_status&quot;: &quot;Accepted with warnings&quot;,
       &quot;is_cleared&quot;: true,
       &quot;is_pending&quot;: false,
-      &quot;reason&quot;: null
+      &quot;reason&quot;: null,
+      &quot;filing&quot;: {
+        &quot;validation_messages&quot;: [
+          &quot;[XSD] validation result : PASSED&quot;,
+          &quot;[EN] validation result : PASSED&quot;,
+          &quot;[KSA] validation result : PASSED&quot;,
+          &quot;[PIH] validation result : PASSED&quot;
+        ],
+        &quot;log&quot;: &quot;log-ACC-SINV-2026-00045-1&quot;,
+        &quot;log_status&quot;: &quot;Accepted with warnings&quot;,
+        &quot;zatca_status&quot;: &quot;CLEARED&quot;,
+        &quot;http_status_code&quot;: 202,
+        &quot;messages&quot;: {
+          &quot;info&quot;: [
+            {
+              &quot;code&quot;: &quot;XSD_ZATCA_VALID&quot;,
+              &quot;category&quot;: &quot;XSD validation&quot;,
+              &quot;message&quot;: &quot;Complied with UBL 2.1 standards in line with ZATCA specifications&quot;
+            }
+          ],
+          &quot;warnings&quot;: [
+            {
+              &quot;code&quot;: &quot;BR-KSA-F-08&quot;,
+              &quot;category&quot;: &quot;KSA&quot;,
+              &quot;message&quot;: &quot;[BR-KSA-F-08] - The value provided in Other Seller ID (BT-29) or Other Buyer ID (BT-46) for the scheme ID &#x27;CRN&#x27; appears to be incorrect. Please recheck the value to avoid non-compliance.&quot;
+            }
+          ],
+          &quot;errors&quot;: []
+        }
+      }
     }
-  },
-  &quot;warnings&quot;: [],
-  &quot;errors&quot;: []
+  }
 }</code></pre>
 
 <h3>What integration_status means</h3>
@@ -514,6 +551,202 @@ response has gone out.</p>
 
 <p>Two booleans save you parsing the strings: <code>is_pending</code> (still waiting) and
 <code>is_cleared</code> (finished successfully).</p>
+
+<h3>Reading <code>zatca.filing</code></h3>
+<p>This is ZATCA's own answer, as opposed to our view of it. It comes from a different
+record than the rest of the block, which is why the two statuses can differ in wording.</p>
+<div class="scroll"><table>
+<thead><tr><th>Field</th><th>What it is</th></tr></thead>
+<tbody>
+<tr><td><code>zatca_status</code></td>
+    <td><strong>The authoritative outcome.</strong> <code>CLEARED</code> for a standard
+        (B2B) invoice, <code>REPORTED</code> for a simplified (B2C) one. Empty on a
+        rejection &mdash; ZATCA does not issue a clearance status with an error.</td></tr>
+<tr><td><code>log_status</code></td>
+    <td>The same value as <code>integration_status</code>, recorded on the filing log.
+        Use <code>integration_status</code>; this is here for tracing.</td></tr>
+<tr><td><code>http_status_code</code></td>
+    <td>ZATCA's HTTP status. <code>200</code>/<code>202</code> accepted,
+        <code>400</code> rejected. The quickest accepted-vs-rejected check there is.</td></tr>
+<tr><td><code>messages.errors</code></td>
+    <td><strong>Why it was rejected</strong>, one entry per rule, each with
+        <code>code</code>, <code>category</code> and <code>message</code>. Empty on
+        success. These are the codes to quote to us.</td></tr>
+<tr><td><code>messages.warnings</code></td>
+    <td>Accepted, but ZATCA objected to something. Log them; do not fail on them.</td></tr>
+<tr><td><code>messages.info</code></td>
+    <td>Passed checks, e.g. <code>XSD_ZATCA_VALID</code>. Useful in a support thread.</td></tr>
+<tr><td><code>validation_messages</code></td>
+    <td>Checks run <em>before</em> the invoice left us (XSD, EN, KSA, PIH). All
+        <code>PASSED</code> here means the document was well formed and any rejection is
+        about its content, not its shape.</td></tr>
+<tr><td><code>log</code></td>
+    <td>Our internal log record. Quote it in a support request.</td></tr>
+</tbody></table></div>
+
+<div class="note">
+<p><strong>The raw reply.</strong> <code>messages</code> is parsed from the JSON body ZATCA
+returned. Add <code>&amp;include_zatca_message=1</code> to get that body verbatim as
+<code>filing.zatca_message</code>. It runs to several KB, so it is off by default &mdash;
+worth requesting when you are raising a case with us, not on every poll.</p>
+</div>
+
+<h3>The three outcomes, captured</h3>
+<p>Same endpoint, three real invoices on the test site.</p>
+
+<p class="lbl">Standard B2B &mdash; cleared</p>
+<pre><code>{
+  &quot;data&quot;: {
+    &quot;invoice&quot;: &quot;ACC-SINV-2026-00045&quot;,
+    &quot;zatca&quot;: {
+      &quot;integration_status&quot;: &quot;Accepted with warnings&quot;,
+      &quot;is_cleared&quot;: true,
+      &quot;is_pending&quot;: false,
+      &quot;filing&quot;: {
+        &quot;validation_messages&quot;: [
+          &quot;[XSD] validation result : PASSED&quot;,
+          &quot;[EN] validation result : PASSED&quot;,
+          &quot;[KSA] validation result : PASSED&quot;,
+          &quot;[PIH] validation result : PASSED&quot;
+        ],
+        &quot;log&quot;: &quot;log-ACC-SINV-2026-00045-1&quot;,
+        &quot;log_status&quot;: &quot;Accepted with warnings&quot;,
+        &quot;zatca_status&quot;: &quot;CLEARED&quot;,
+        &quot;http_status_code&quot;: 202,
+        &quot;messages&quot;: {
+          &quot;info&quot;: [
+            {
+              &quot;code&quot;: &quot;XSD_ZATCA_VALID&quot;,
+              &quot;category&quot;: &quot;XSD validation&quot;,
+              &quot;message&quot;: &quot;Complied with UBL 2.1 standards in line with ZATCA specifications&quot;
+            }
+          ],
+          &quot;warnings&quot;: [
+            {
+              &quot;code&quot;: &quot;BR-KSA-F-08&quot;,
+              &quot;category&quot;: &quot;KSA&quot;,
+              &quot;message&quot;: &quot;[BR-KSA-F-08] - The value provided in Other Seller ID (BT-29) or Other Buyer ID (BT-46) for the scheme ID &#x27;CRN&#x27; appears to be incorrect. Please recheck the value to avoid non-compliance.&quot;
+            }
+          ],
+          &quot;errors&quot;: []
+        }
+      }
+    }
+  }
+}</code></pre>
+
+<p class="lbl">Simplified B2C &mdash; reported, not cleared</p>
+<pre><code>{
+  &quot;data&quot;: {
+    &quot;invoice&quot;: &quot;ACC-SINV-2026-00044&quot;,
+    &quot;zatca&quot;: {
+      &quot;integration_status&quot;: &quot;Accepted with warnings&quot;,
+      &quot;is_cleared&quot;: true,
+      &quot;is_pending&quot;: false,
+      &quot;filing&quot;: {
+        &quot;validation_messages&quot;: [
+          &quot;[XSD] validation result : PASSED&quot;,
+          &quot;[EN] validation result : PASSED&quot;,
+          &quot;[KSA] validation result : PASSED&quot;,
+          &quot;[QR] validation result : PASSED&quot;,
+          &quot;[SIGNATURE] validation result : PASSED&quot;,
+          &quot;[PIH] validation result : PASSED&quot;
+        ],
+        &quot;log&quot;: &quot;log-ACC-SINV-2026-00044-1&quot;,
+        &quot;log_status&quot;: &quot;Accepted with warnings&quot;,
+        &quot;zatca_status&quot;: &quot;REPORTED&quot;,
+        &quot;http_status_code&quot;: 202,
+        &quot;messages&quot;: {
+          &quot;info&quot;: [
+            {
+              &quot;code&quot;: &quot;XSD_ZATCA_VALID&quot;,
+              &quot;category&quot;: &quot;XSD validation&quot;,
+              &quot;message&quot;: &quot;Complied with UBL 2.1 standards in line with ZATCA specifications&quot;
+            }
+          ],
+          &quot;warnings&quot;: [
+            {
+              &quot;code&quot;: &quot;BR-KSA-F-08&quot;,
+              &quot;category&quot;: &quot;KSA&quot;,
+              &quot;message&quot;: &quot;[BR-KSA-F-08] - The value provided in Other Seller ID (BT-29) or Other Buyer ID (BT-46) for the scheme ID &#x27;CRN&#x27; appears to be incorrect. Please recheck the value to avoid non-compliance.&quot;
+            }
+          ],
+          &quot;errors&quot;: []
+        }
+      }
+    }
+  }
+}</code></pre>
+
+<p class="lbl">Rejected &mdash; note the empty <code>zatca_status</code> and the error codes</p>
+<pre><code>{
+  &quot;data&quot;: {
+    &quot;invoice&quot;: &quot;ACC-SINV-2026-00020&quot;,
+    &quot;zatca&quot;: {
+      &quot;integration_status&quot;: &quot;Rejected&quot;,
+      &quot;is_cleared&quot;: false,
+      &quot;is_pending&quot;: false,
+      &quot;filing&quot;: {
+        &quot;validation_messages&quot;: [
+          &quot;[XSD] validation result : PASSED&quot;,
+          &quot;[EN] validation result : FAILED&quot;,
+          &quot;[KSA] validation result : PASSED&quot;,
+          &quot;[PIH] validation result : PASSED&quot;
+        ],
+        &quot;log&quot;: &quot;log-ACC-SINV-2026-00020-1&quot;,
+        &quot;log_status&quot;: &quot;Rejected&quot;,
+        &quot;zatca_status&quot;: &quot;&quot;,
+        &quot;http_status_code&quot;: 400,
+        &quot;messages&quot;: {
+          &quot;info&quot;: [
+            {
+              &quot;code&quot;: &quot;XSD_ZATCA_VALID&quot;,
+              &quot;category&quot;: &quot;XSD validation&quot;,
+              &quot;message&quot;: &quot;Complied with UBL 2.1 standards in line with ZATCA specifications&quot;
+            }
+          ],
+          &quot;warnings&quot;: [
+            {
+              &quot;code&quot;: &quot;BR-CO-17&quot;,
+              &quot;category&quot;: &quot;EN_16931&quot;,
+              &quot;message&quot;: &quot;VAT category tax amount (BT-117) = VAT category taxable amount (BT-116) x (VAT category rate (BT-119) / 100), rounded to two decimals.&quot;
+            },
+            {
+              &quot;code&quot;: &quot;BR-S-09&quot;,
+              &quot;category&quot;: &quot;EN_16931&quot;,
+              &quot;message&quot;: &quot;The VAT category tax amount (BT-117) in a VAT breakdown (BG-23) where VAT category code (BT-118) is &#x27;Standard rated&#x27; shall equal the VAT category taxable amount (BT-116) multiplied by the VAT category rate (BT-119).&quot;
+            },
+            {
+              &quot;code&quot;: &quot;BR-KSA-F-08&quot;,
+              &quot;category&quot;: &quot;KSA&quot;,
+              &quot;message&quot;: &quot;[BR-KSA-F-08] - The value provided in Other Seller ID (BT-29) or Other Buyer ID (BT-46) for the scheme ID &#x27;CRN&#x27; appears to be incorrect. Please recheck the value to avoid non-compliance.&quot;
+            }
+          ],
+          &quot;errors&quot;: [
+            {
+              &quot;code&quot;: &quot;BR-CO-15&quot;,
+              &quot;category&quot;: &quot;EN_16931&quot;,
+              &quot;message&quot;: &quot;Invoice total amount with VAT (BT-112) &quot;
+            },
+            {
+              &quot;code&quot;: &quot;BR-CO-14&quot;,
+              &quot;category&quot;: &quot;EN_16931&quot;,
+              &quot;message&quot;: &quot;Invoice total VAT amount (BT-110) &quot;
+            }
+          ]
+        }
+      }
+    }
+  }
+}</code></pre>
+
+<div class="danger">
+<p><strong>Decide on <code>zatca_status</code> and <code>messages.errors</code>, not on
+<code>success</code>.</strong> The envelope's <code>success: true</code> means <em>we</em>
+answered your question, not that ZATCA accepted the invoice. A rejected filing is a
+perfectly successful <code>get_status</code> call.</p>
+</div>
+
 
 <h3>Recommended polling</h3>
 <pre><code>after create_invoice succeeds:
