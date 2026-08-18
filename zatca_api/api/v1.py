@@ -562,7 +562,12 @@ def resubmit_to_zatca(invoice: str | None = None, external_id: str | None = None
 
 
 @frappe.whitelist(methods=['GET'])
-def get_invoice(invoice: str | None = None, external_id: str | None = None, include_xml: int = 0):
+def get_invoice(
+    invoice: str | None = None,
+    external_id: str | None = None,
+    include_xml: int = 0,
+    include_zatca_message: int = 0,
+):
     """Fetch one invoice with its ZATCA block. Look it up by name or by external id."""
     request_id = new_request_id()
 
@@ -598,6 +603,7 @@ def get_invoice(invoice: str | None = None, external_id: str | None = None, incl
                 settings=settings,
                 company=summary['company'],
                 include_xml=bool(cint(include_xml)) or None,
+                include_zatca_message=bool(cint(include_zatca_message)),
             ),
         },
         request_id,
@@ -605,7 +611,11 @@ def get_invoice(invoice: str | None = None, external_id: str | None = None, incl
 
 
 @frappe.whitelist(methods=['GET'])
-def get_status(invoice: str | None = None, external_id: str | None = None):
+def get_status(
+    invoice: str | None = None,
+    external_id: str | None = None,
+    include_zatca_message: int = 0,
+):
     """Cheap poll for ZATCA clearance state.
 
     The QR, UUID and invoice hash are available the moment the invoice is
@@ -635,7 +645,13 @@ def get_status(invoice: str | None = None, external_id: str | None = None):
         return _handle_guard_error('get_status', exc, request_id)
 
     row = frappe.db.get_value('Sales Invoice', name, ['docstatus', 'status', 'company'], as_dict=True)
-    zatca_block = zatca.get_zatca_details(name, 'Sales Invoice', settings=settings, company=row['company'])
+    zatca_block = zatca.get_zatca_details(
+        name,
+        'Sales Invoice',
+        settings=settings,
+        company=row['company'],
+        include_zatca_message=bool(cint(include_zatca_message)),
+    )
 
     return success_response(
         {
@@ -650,6 +666,10 @@ def get_status(invoice: str | None = None, external_id: str | None = None):
                 'is_cleared': zatca_block.get('is_cleared'),
                 'is_pending': zatca_block.get('is_pending'),
                 'reason': zatca_block.get('reason'),
+                # ZATCA's own verdict, from the Integration Log: zatca_status is
+                # CLEARED for a standard invoice, REPORTED for a simplified one.
+                # `filing` also carries the parsed per-rule validation messages.
+                'filing': zatca_block.get('filing'),
             },
         },
         request_id,

@@ -29,14 +29,17 @@ Verified against ksa_compliance 0.58.0 / frappe 15.68.1.
 """
 
 import base64
+import json
 import time
 from io import BytesIO
 
 import frappe
 from frappe import _
-from frappe.utils import cint
+from frappe.utils import cint, cstr
 
 SIAF_DOCTYPE = 'Sales Invoice Additional Fields'
+# ZATCA's reply is logged here, separately from SIAF.
+LOG_DOCTYPE = 'ZATCA Integration Log'
 
 # ZATCA has finished with the invoice once it leaves this status. `ksa_compliance`
 # sets 'Ready For Batch' at SIAF before_insert and overwrites it with the mapped
@@ -104,6 +107,87 @@ def _render_qr_png(qr_content: str) -> dict:
     }
 
 
+def _filing_details(siaf_name: str, invoice_name: str, doctype: str, include_raw: bool) -> dict:
+    """ZATCA's own verdict, read from the ZATCA Integration Log.
+
+    The Log is a different doctype from SIAF and carries what SIAF does not: ZATCA's
+    ``zatca_status`` (``CLEARED`` for a standard invoice, ``REPORTED`` for a simplified
+    one, ``NOT_CLEARED`` / ``NOT_REPORTED`` on rejection), the HTTP status of the call, and
+    ``zatca_message`` -- the raw JSON body ZATCA replied with, holding the per-rule
+    validation results.
+
+    That body is parsed into info / warning / error lists here, because a caller wanting to
+    know *why* a filing was rejected should not have to parse a JSON string nested inside a
+    JSON response. The raw text is returned only on request; it runs to several KB.
+    """
+    row = frappe.db.get_value(
+        LOG_DOCTYPE,
+        {'invoice_reference': invoice_name, 'invoice_doctype': doctype},
+        ['name', 'status', 'zatca_status', 'zatca_http_status_code', 'zatca_message'],
+        as_dict=True,
+        order_by='creation desc',
+    )
+
+    validation = cstr(frappe.db.get_value(SIAF_DOCTYPE, siaf_name, 'validation_messages') or '')
+    details = {
+        # ksa_compliance's own pre-submission checks (XSD / EN / KSA / PIH), one per line.
+        'validation_messages': [line.strip() for line in validation.splitlines() if line.strip()],
+    }
+
+    if not row:
+        # No Log row yet: the submission job has not run, or clearance is switched off.
+        details.update({'zatca_status': None, 'log_status': None, 'http_status_code': None,
+                        'messages': {'info': [], 'warnings': [], 'errors': []}})
+        return details
+
+    details.update({
+        'log': row['name'],
+        'log_status': row.get('status'),
+        'zatca_status': row.get('zatca_status'),
+        'http_status_code': cint(row.get('zatca_http_status_code')) or None,
+        'messages': _parse_zatca_message(row.get('zatca_message')),
+    })
+    if include_raw:
+        details['zatca_message'] = row.get('zatca_message')
+
+    return details
+
+
+def _parse_zatca_message(message: str | None) -> dict:
+    """Split ZATCA's reply body into info / warning / error lists.
+
+    Returns empty lists rather than raising when the body is absent or is not the JSON
+    envelope we expect -- a status field the caller can trust matters more than a parse
+    error, and ZATCA has changed this shape before.
+    """
+    empty = {'info': [], 'warnings': [], 'errors': []}
+    text = cstr(message or '').strip()
+    if not text.startswith('{'):
+        return dict(empty, raw_text=text) if text else empty
+
+    try:
+        results = (json.loads(text).get('validationResults') or {})
+    except (ValueError, AttributeError):
+        return empty
+
+    def shape(entries):
+        return [
+            {
+                'code': entry.get('code'),
+                'category': entry.get('category'),
+                'message': entry.get('message'),
+            }
+            for entry in (entries or [])
+            if isinstance(entry, dict)
+        ]
+
+    return {
+        'info': shape(results.get('infoMessages')),
+        'warnings': shape(results.get('warningMessages')),
+        'errors': shape(results.get('errorMessages')),
+    }
+
+
 def _phase_2_details(invoice_name: str, doctype: str, flags: dict) -> dict | None:
     """Read the latest SIAF row for this invoice and shape it for the response."""
     row = frappe.db.get_value(
@@ -165,6 +249,11 @@ def _phase_2_details(invoice_name: str, doctype: str, flags: dict) -> dict | Non
         'is_pending': status in PENDING_STATUSES,
     }
 
+    # ZATCA's own verdict lives on the Integration Log, not on SIAF.
+    details['filing'] = _filing_details(
+        row['name'], invoice_name, doctype, bool(flags.get('include_zatca_message'))
+    )
+
     if flags['include_png']:
         details.update(_render_qr_png(row.get('qr_code')))
 
@@ -221,6 +310,7 @@ def get_zatca_details(
     company: str | None = None,
     include_png: bool | None = None,
     include_xml: bool | None = None,
+    include_zatca_message: bool | None = None,
 ) -> dict:
     """Return the ZATCA block for an invoice.
 
@@ -240,6 +330,9 @@ def get_zatca_details(
     flags = {
         'include_png': cint(settings.include_qr_png) if include_png is None else bool(include_png),
         'include_xml': cint(settings.include_signed_xml) if include_xml is None else bool(include_xml),
+        # ZATCA's raw reply body runs to several KB, so it is opt-in per request. The
+        # parsed info/warning/error lists are always returned.
+        'include_zatca_message': bool(include_zatca_message),
     }
 
     phase_setting = settings.zatca_phase or 'Auto'
