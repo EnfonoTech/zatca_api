@@ -17,8 +17,10 @@ Every test skips cleanly when `ksa_compliance` is not installed.
 """
 
 import base64
+import json
 
 import frappe
+from frappe.tests.utils import FrappeTestCase
 
 from zatca_api.api import v1
 from zatca_api.services import zatca
@@ -496,3 +498,60 @@ class TestSubmitAndQueue(ZATCAAPITestCase):
             self.assertEqual(response['data']['invoice']['docstatus'], 0)
         finally:
             _configure_settings()
+
+
+class TestZatcaMessageParsing(FrappeTestCase):
+    """ZATCA's reply body is upstream JSON, so parsing it must never raise.
+
+    A status the caller can trust is worth more than a parse error: ZATCA has changed
+    this envelope before, and an exception here would fail a request whose invoice was
+    filed perfectly well.
+    """
+
+    def test_parses_the_three_message_lists(self):
+        body = json.dumps(
+            {
+                'validationResults': {
+                    'infoMessages': [
+                        {'code': 'XSD_ZATCA_VALID', 'category': 'XSD validation', 'message': 'ok'}
+                    ],
+                    'warningMessages': [{'code': 'BR-KSA-F-08', 'category': 'KSA', 'message': 'crn'}],
+                    'errorMessages': [{'code': 'BR-CO-14', 'category': 'EN', 'message': 'vat total'}],
+                }
+            }
+        )
+        parsed = zatca._parse_zatca_message(body)
+
+        self.assertEqual([m['code'] for m in parsed['info']], ['XSD_ZATCA_VALID'])
+        self.assertEqual([m['code'] for m in parsed['warnings']], ['BR-KSA-F-08'])
+        self.assertEqual(parsed['errors'][0]['category'], 'EN')
+        self.assertEqual(parsed['errors'][0]['message'], 'vat total')
+
+    def test_missing_lists_become_empty(self):
+        parsed = zatca._parse_zatca_message('{"validationResults": {}}')
+        self.assertEqual(parsed, {'info': [], 'warnings': [], 'errors': []})
+
+    def test_no_validation_results_key(self):
+        parsed = zatca._parse_zatca_message('{"something": "else"}')
+        self.assertEqual(parsed, {'info': [], 'warnings': [], 'errors': []})
+
+    def test_none_and_empty_are_safe(self):
+        for value in (None, '', '   '):
+            self.assertEqual(
+                zatca._parse_zatca_message(value), {'info': [], 'warnings': [], 'errors': []}
+            )
+
+    def test_plain_text_body_is_preserved_not_dropped(self):
+        """A non-JSON body still carries the reason; surface it rather than discard it."""
+        parsed = zatca._parse_zatca_message('502 Bad Gateway from the gateway')
+        self.assertEqual(parsed['raw_text'], '502 Bad Gateway from the gateway')
+        self.assertEqual(parsed['errors'], [])
+
+    def test_malformed_json_does_not_raise(self):
+        parsed = zatca._parse_zatca_message('{"validationResults": {oops')
+        self.assertEqual(parsed, {'info': [], 'warnings': [], 'errors': []})
+
+    def test_non_dict_entries_are_skipped(self):
+        """Defensive: a list of strings where objects were expected must not crash."""
+        body = json.dumps({'validationResults': {'errorMessages': ['just a string', None]}})
+        self.assertEqual(zatca._parse_zatca_message(body)['errors'], [])
