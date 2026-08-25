@@ -18,6 +18,10 @@
   "column_break_auth",
   "auth_username",
   "auth_secret",
+  "token_url",
+  "token_response_path",
+  "token_ttl_seconds",
+  "token_request_body",
   "section_shape",
   "payload_root",
   "status_key",
@@ -109,7 +113,8 @@
    "fieldname": "auth_type",
    "fieldtype": "Select",
    "label": "Auth Type",
-   "options": "None\nHeader Key\nBearer Token\nBasic"
+   "options": "None\nHeader Key\nBearer Token\nBasic\nLogin (Token)",
+   "description": "How to authenticate to the upstream API. <b>Login (Token)</b> exchanges the username and secret below for a short-lived bearer token before each pull, which is what a JWT-issuing API needs: a pasted token expires."
   },
   {
    "default": "x-api-key",
@@ -134,6 +139,37 @@
    "fieldname": "auth_secret",
    "fieldtype": "Password",
    "label": "Secret / API Key"
+  },
+  {
+   "fieldname": "token_url",
+   "fieldtype": "Data",
+   "label": "Token / Login URL",
+   "options": "URL",
+   "depends_on": "eval:doc.auth_type==\"Login (Token)\"",
+   "description": "Endpoint that exchanges credentials for a token, e.g. <code>https://host/api/user/account/login</code>."
+  },
+  {
+   "fieldname": "token_response_path",
+   "fieldtype": "Data",
+   "label": "Token Path In Response",
+   "default": "data.token",
+   "depends_on": "eval:doc.auth_type==\"Login (Token)\"",
+   "description": "Dotted path to the token inside the login response. <code>data.token</code> reads <code>{\"data\": {\"token\": \"...\"}}</code>."
+  },
+  {
+   "fieldname": "token_ttl_seconds",
+   "fieldtype": "Int",
+   "label": "Token TTL (seconds)",
+   "default": "3300",
+   "depends_on": "eval:doc.auth_type==\"Login (Token)\"",
+   "description": "Fallback lifetime, used only when the token is not a JWT carrying an <code>exp</code> claim. A JWT is trusted over this value."
+  },
+  {
+   "fieldname": "token_request_body",
+   "fieldtype": "Code",
+   "label": "Login Request Body",
+   "depends_on": "eval:doc.auth_type==\"Login (Token)\"",
+   "description": "JSON sent to the login URL. Use <code>{{username}}</code> and <code>{{password}}</code> placeholders; they are filled from the fields above so the secret is never stored in this box."
   },
   {
    "fieldname": "section_shape",

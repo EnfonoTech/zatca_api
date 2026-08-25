@@ -4,8 +4,41 @@
 import json
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 from frappe.utils import add_days, cint, cstr, get_datetime, now_datetime
+
+
+# A JWT is refreshed this many seconds before it expires, so a token cannot lapse
+# between build_headers() and the request it authenticates.
+TOKEN_REFRESH_MARGIN = 60
+TOKEN_CACHE_PREFIX = 'zatca_api::source_token::'
+DEFAULT_LOGIN_BODY = '{"username": "{{username}}", "password": "{{password}}"}'
+
+
+def _jwt_expiry(token: str) -> int | None:
+    """Seconds until a JWT's ``exp``, or None if the token is not a readable JWT.
+
+    The signature is deliberately not verified: this is the *client* of the token and has
+    no key to verify with. The claim is read only to schedule a refresh, so a wrong value
+    costs one extra login, never a security decision.
+    """
+    import base64
+    import time
+
+    parts = cstr(token).split('.')
+    if len(parts) != 3:
+        return None
+
+    try:
+        payload = parts[1] + '=' * (-len(parts[1]) % 4)
+        exp = json.loads(base64.urlsafe_b64decode(payload)).get('exp')
+    except Exception:
+        return None
+
+    if not exp:
+        return None
+    return cint(exp) - int(time.time())
 
 
 class ZATCAAPISource(Document):
@@ -26,6 +59,8 @@ class ZATCAAPISource(Document):
             headers[(self.auth_header_name or 'x-api-key').strip()] = secret
         elif self.auth_type == 'Bearer Token' and secret:
             headers['Authorization'] = f'Bearer {secret}'
+        elif self.auth_type == 'Login (Token)':
+            headers['Authorization'] = f'Bearer {self.login_token()}'
 
         for line in cstr(self.custom_headers).splitlines():
             line = line.strip()
@@ -38,6 +73,90 @@ class ZATCAAPISource(Document):
                 headers[name] = value.strip()
 
         return headers
+
+    def login_token(self) -> str:
+        """A valid bearer token, from cache or by logging in.
+
+        The token is cached in Redis rather than on this row: it is short-lived, it is a
+        credential, and writing it back would mean a DB write on every pull of a child row
+        inside a Single. Redis expiry also does the invalidation for us.
+        """
+        key = TOKEN_CACHE_PREFIX + cstr(self.source_name)
+        cached = frappe.cache().get_value(key)
+        if cached:
+            return cstr(cached)
+
+        token = self._fetch_login_token()
+        ttl = _jwt_expiry(token)
+        if ttl is None:
+            # Not a JWT, so trust the configured fallback instead of guessing.
+            ttl = cint(self.token_ttl_seconds) or 3300
+        ttl -= TOKEN_REFRESH_MARGIN
+
+        if ttl > 0:
+            frappe.cache().set_value(key, token, expires_in_sec=ttl)
+        return token
+
+    def _fetch_login_token(self) -> str:
+        """POST the credentials to the login URL and dig the token out of the reply."""
+        import requests
+
+        if not self.token_url:
+            frappe.throw(
+                _('Source {0} uses Login (Token) but has no Token / Login URL.').format(
+                    self.source_name
+                )
+            )
+
+        secret = self.get_password('auth_secret', raise_exception=False) or ''
+        template = cstr(self.token_request_body).strip() or DEFAULT_LOGIN_BODY
+        # json.dumps then strip the quotes: escapes any quote or backslash in the value so
+        # a password containing one cannot break out of the JSON string it sits in.
+        body = template.replace('{{username}}', json.dumps(cstr(self.auth_username))[1:-1])
+        body = body.replace('{{password}}', json.dumps(secret)[1:-1])
+
+        try:
+            payload = json.loads(body)
+        except ValueError as exc:
+            frappe.throw(
+                _('Login Request Body for source {0} is not valid JSON: {1}').format(
+                    self.source_name, exc
+                )
+            )
+
+        try:
+            response = requests.post(
+                self.token_url,
+                json=payload,
+                headers={'Accept': 'application/json', 'Content-Type': 'application/json'},
+                timeout=self.request_timeout,
+                verify=bool(cint(self.verify_ssl)),
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:
+            # Deliberately does not log the request body: it holds the password.
+            frappe.throw(
+                _('Login failed for source {0} at {1}: {2}').format(
+                    self.source_name, self.token_url, cstr(exc)[:200]
+                )
+            )
+
+        path = cstr(self.token_response_path).strip() or 'data.token'
+        token = data
+        for part in path.split('.'):
+            if not isinstance(token, dict):
+                token = None
+                break
+            token = token.get(part)
+
+        if not token:
+            frappe.throw(
+                _('Login for source {0} succeeded but no token was found at {1!r} in the '
+                  'response. Check Token Path In Response.').format(self.source_name, path)
+            )
+
+        return cstr(token)
 
     def build_auth(self):
         """A ``requests``-compatible auth tuple for Basic auth, else None."""
