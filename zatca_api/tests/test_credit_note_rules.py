@@ -19,10 +19,12 @@ from frappe.utils import add_days, today
 
 from zatca_api.services.invoice import (
     DEFAULT_RETURN_REASON,
+    PARTY_DERIVED_FIELDS,
     RETURN_REASON_FIELD,
     RETURN_REASON_MAX_LENGTH,
     _apply_return_reason,
     _inherited_item_tax_templates,
+    _reset_party_fields,
 )
 from zatca_api.services.payload import PayloadError, normalise_invoice, validate_invoice
 
@@ -190,3 +192,64 @@ class TestInheritedItemTaxTemplate(FrappeTestCase):
         result, _ = self._inherited({'is_return': 1, 'return_against': 'X'}, rows)
         self.assertEqual(len(result), 3)
         self.assertEqual(result['SVC-EXEMPT'], 'KSA Exempt - ZTC')
+
+
+class TestPartyFieldsOnReusedDraft(FrappeTestCase):
+    """A reused draft must not keep the previous customer's derived fields.
+
+    ERPNext validates that `customer_address` belongs to the party being invoiced. A feed
+    that corrects a customer name on an existing external id therefore failed with
+    "Billing Address does not belong to the <new customer>", naming neither the stale
+    field nor the old party. Observed live: a draft built when the upstream feed said
+    `AZADTESTS` kept `customer_address = 'AZADTESTS Billing-Billing'` after the feed
+    changed the customer to `customer1`.
+    """
+
+    def _doc(self, **values):
+        doc = _Doc(**values)
+        doc.meta = MagicMock()
+        doc.meta.get_field.return_value = MagicMock()
+        return doc
+
+    def test_changing_customer_clears_the_stale_address(self):
+        doc = self._doc(
+            customer='AZADTESTS',
+            customer_address='AZADTESTS Billing-Billing',
+            address_display='Olaya Street, Riyadh',
+        )
+        _reset_party_fields(doc, 'customer1')
+
+        self.assertIsNone(doc['customer_address'])
+        self.assertIsNone(doc['address_display'])
+
+    def test_same_customer_is_left_untouched(self):
+        """Clearing on every update would discard a shipping address set by hand."""
+        doc = self._doc(
+            customer='customer1',
+            customer_address='customer1 Billing-Billing',
+            shipping_address_name='customer1 Warehouse-Shipping',
+        )
+        _reset_party_fields(doc, 'customer1')
+
+        self.assertEqual(doc['customer_address'], 'customer1 Billing-Billing')
+        self.assertEqual(doc['shipping_address_name'], 'customer1 Warehouse-Shipping')
+
+    def test_every_party_derived_field_is_cleared(self):
+        doc = self._doc(customer='OLD', **{f: 'stale' for f in PARTY_DERIVED_FIELDS})
+        _reset_party_fields(doc, 'NEW')
+
+        still_set = [f for f in PARTY_DERIVED_FIELDS if doc.get(f) is not None]
+        self.assertEqual(still_set, [], f'not cleared: {still_set}')
+
+    def test_a_field_absent_from_the_doctype_is_skipped(self):
+        """Not every field exists on every ERPNext build; a missing one must not raise."""
+        doc = _Doc(customer='OLD', customer_address='stale')
+        doc.meta = MagicMock()
+        doc.meta.get_field.side_effect = lambda f: None if f == 'tax_category' else MagicMock()
+        _reset_party_fields(doc, 'NEW')
+        self.assertIsNone(doc['customer_address'])
+
+    def test_contact_fields_are_included(self):
+        """A stale contact_person fails the same way customer_address does."""
+        for field in ('contact_person', 'contact_email', 'contact_mobile'):
+            self.assertIn(field, PARTY_DERIVED_FIELDS)

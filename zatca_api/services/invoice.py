@@ -453,6 +453,49 @@ def _apply_header(doc, payload: dict, company: str, customer: str, settings) -> 
     apply_field_mappings(doc, 'Sales Invoice', payload.get('raw') or {}, settings)
 
 
+# Fields ERPNext derives from the customer rather than from our payload. On a REUSED
+# draft they still hold the previous customer's values, and ERPNext validates that
+# `customer_address` belongs to the party being invoiced
+# (`accounts_controller.validate_party_address`). So a feed that corrects a customer name
+# on an existing external id fails with
+#
+#     Billing Address does not belong to the <new customer>
+#
+# naming neither the stale field nor the old party. Measured on the test site: a draft
+# built when the upstream feed said `AZADTESTS` kept `customer_address =
+# 'AZADTESTS Billing-Billing'` after the feed changed the customer to `customer1`, and
+# every subsequent pull of that invoice failed.
+PARTY_DERIVED_FIELDS = (
+    'customer_address',
+    'address_display',
+    'shipping_address_name',
+    'shipping_address',
+    'contact_person',
+    'contact_display',
+    'contact_email',
+    'contact_mobile',
+    'contact_phone',
+    'customer_group',
+    'territory',
+    'tax_category',
+)
+
+
+def _reset_party_fields(doc, customer: str) -> None:
+    """Clear inherited party fields when a reused draft changes hands.
+
+    Only when the customer actually changes: clearing them on every update would discard
+    a shipping address or contact a user had set by hand in the desk.
+    """
+    if cstr(doc.get('customer')) == cstr(customer):
+        return
+
+    meta = doc.meta
+    for field in PARTY_DERIVED_FIELDS:
+        if meta.get_field(field):
+            doc.set(field, None)
+
+
 def build_invoice(payload: dict, settings) -> tuple:
     """Create or update the Sales Invoice. Returns ``(InvoiceResult, warnings)``."""
     validate_invoice(payload)
@@ -489,12 +532,20 @@ def build_invoice(payload: dict, settings) -> tuple:
         doc.set('items', [])
         doc.set('taxes', [])
         doc.set('payments', [])
+        _reset_party_fields(doc, customer)
         action = 'updated'
     else:
         doc = frappe.new_doc('Sales Invoice')
         action = 'created'
 
     _apply_header(doc, payload, company, customer, settings)
+
+    # Bind the invoice to the address we just ensured for THIS customer instead of leaving
+    # ERPNext to pick a default. On a fresh document its default is right; on a reused one
+    # it is whatever the previous party had.
+    if address_result.get('address'):
+        doc.customer_address = address_result['address']
+
     _append_items(doc, payload, company, settings)
 
     for row in _resolve_taxes(payload, company, doc):
