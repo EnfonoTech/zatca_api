@@ -568,39 +568,37 @@ class TestSourceTokenCacheInvalidation(FrappeTestCase):
     to an edit made hours earlier.
     """
 
-    def test_every_source_token_is_dropped(self):
+    def _invalidate(self, source_names):
+        """Run the invalidation against a stand-in source list, capturing the deletes."""
         from zatca_api.zatca_api.doctype.zatca_api_settings.zatca_api_settings import (
             ZATCAAPISettings,
         )
+
+        settings = frappe.get_doc('ZATCA API Settings')
+        # Assign on the INSTANCE: `sources` is a child-table attribute of the document,
+        # not a class attribute, so patching the class leaves the real rows in place.
+        settings.sources = [frappe._dict(source_name=n) for n in source_names]
+
+        with patch(
+            'zatca_api.zatca_api.doctype.zatca_api_settings.zatca_api_settings.frappe.cache'
+        ) as cache:
+            settings.invalidate_source_tokens()
+
+        return [call.args[0] for call in cache.return_value.delete_value.call_args_list]
+
+    def test_every_source_token_is_dropped(self):
         from zatca_api.zatca_api.doctype.zatca_api_source.zatca_api_source import (
             TOKEN_CACHE_PREFIX,
         )
 
-        settings = frappe.get_doc('ZATCA API Settings')
-        rows = [frappe._dict(source_name='Alpha'), frappe._dict(source_name='Beta')]
-
-        with patch.object(ZATCAAPISettings, 'sources', rows, create=True):
-            with patch('zatca_api.zatca_api.doctype.zatca_api_settings.'
-                       'zatca_api_settings.frappe.cache') as cache:
-                settings.invalidate_source_tokens()
-
-        deleted = [c.args[0] for c in cache.return_value.delete_value.call_args_list]
+        deleted = self._invalidate(['Alpha', 'Beta'])
         self.assertEqual(
             deleted, [TOKEN_CACHE_PREFIX + 'Alpha', TOKEN_CACHE_PREFIX + 'Beta']
         )
 
     def test_a_row_without_a_name_is_skipped(self):
         """A half-filled grid row must not delete the key for the empty string."""
-        from zatca_api.zatca_api.doctype.zatca_api_settings.zatca_api_settings import (
-            ZATCAAPISettings,
-        )
+        self.assertEqual(self._invalidate(['', None]), [])
 
-        settings = frappe.get_doc('ZATCA API Settings')
-        rows = [frappe._dict(source_name=''), frappe._dict(source_name=None)]
-
-        with patch.object(ZATCAAPISettings, 'sources', rows, create=True):
-            with patch('zatca_api.zatca_api.doctype.zatca_api_settings.'
-                       'zatca_api_settings.frappe.cache') as cache:
-                settings.invalidate_source_tokens()
-
-        cache.return_value.delete_value.assert_not_called()
+    def test_no_sources_is_a_noop(self):
+        self.assertEqual(self._invalidate([]), [])

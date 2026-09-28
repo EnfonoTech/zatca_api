@@ -126,6 +126,10 @@ def _configure_settings(**overrides):
     settings.submit_mode = 'Immediate'
     settings.update_existing_drafts = 1
     settings.enforce_b2b_address = 1
+    # Pinned so a site whose operator switched these on cannot change what the
+    # response-shape assertions see.
+    settings.include_signed_xml = 0
+    settings.include_qr_png = 1
     settings.log_requests = 0
     settings.wait_for_zatca_seconds = 0
     settings.field_mappings = []
@@ -178,6 +182,8 @@ class ZATCAAPITestCase(FrappeTestCase):
         'enforce_b2b_address',
         'log_requests',
         'wait_for_zatca_seconds',
+        'include_signed_xml',
+        'include_qr_png',
     )
 
     @classmethod

@@ -204,7 +204,10 @@ def _require_zatca_tax_category(payload: dict, company: str) -> None:
     """
     from zatca_api.services.zatca import get_phase_for_company
 
-    if get_phase_for_company(company) == 'None':
+    # Phase 2 only. Phase 1 computes its QR locally from the invoice totals and never
+    # builds a UBL document, so it has no VAT categories to derive and this requirement
+    # does not apply -- firing it there rejects payloads that file perfectly well.
+    if get_phase_for_company(company) != 'Phase 2':
         return
 
     if any(item.get('item_tax_template') for item in payload.get('items') or []):
