@@ -18,6 +18,7 @@ Every test skips cleanly when `ksa_compliance` is not installed.
 
 import base64
 import json
+from unittest.mock import patch
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
@@ -555,3 +556,51 @@ class TestZatcaMessageParsing(FrappeTestCase):
         """Defensive: a list of strings where objects were expected must not crash."""
         body = json.dumps({'validationResults': {'errorMessages': ['just a string', None]}})
         self.assertEqual(zatca._parse_zatca_message(body)['errors'], [])
+
+
+class TestSourceTokenCacheInvalidation(FrappeTestCase):
+    """Saving the settings must drop every cached bearer token.
+
+    A Login (Token) source caches its JWT in Redis until shortly before it expires — up to
+    eight hours. Nothing about editing the username or secret evicts that entry, so without
+    this a credential change appears to do nothing: the scheduler keeps authenticating as
+    the previous user until the old token lapses, then starts failing with no obvious link
+    to an edit made hours earlier.
+    """
+
+    def test_every_source_token_is_dropped(self):
+        from zatca_api.zatca_api.doctype.zatca_api_settings.zatca_api_settings import (
+            ZATCAAPISettings,
+        )
+        from zatca_api.zatca_api.doctype.zatca_api_source.zatca_api_source import (
+            TOKEN_CACHE_PREFIX,
+        )
+
+        settings = frappe.get_doc('ZATCA API Settings')
+        rows = [frappe._dict(source_name='Alpha'), frappe._dict(source_name='Beta')]
+
+        with patch.object(ZATCAAPISettings, 'sources', rows, create=True):
+            with patch('zatca_api.zatca_api.doctype.zatca_api_settings.'
+                       'zatca_api_settings.frappe.cache') as cache:
+                settings.invalidate_source_tokens()
+
+        deleted = [c.args[0] for c in cache.return_value.delete_value.call_args_list]
+        self.assertEqual(
+            deleted, [TOKEN_CACHE_PREFIX + 'Alpha', TOKEN_CACHE_PREFIX + 'Beta']
+        )
+
+    def test_a_row_without_a_name_is_skipped(self):
+        """A half-filled grid row must not delete the key for the empty string."""
+        from zatca_api.zatca_api.doctype.zatca_api_settings.zatca_api_settings import (
+            ZATCAAPISettings,
+        )
+
+        settings = frappe.get_doc('ZATCA API Settings')
+        rows = [frappe._dict(source_name=''), frappe._dict(source_name=None)]
+
+        with patch.object(ZATCAAPISettings, 'sources', rows, create=True):
+            with patch('zatca_api.zatca_api.doctype.zatca_api_settings.'
+                       'zatca_api_settings.frappe.cache') as cache:
+                settings.invalidate_source_tokens()
+
+        cache.return_value.delete_value.assert_not_called()

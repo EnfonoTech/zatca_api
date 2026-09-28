@@ -40,6 +40,32 @@ class ZATCAAPISettings(Document):
         self.validate_sources()
         self.validate_shared_secret()
 
+    def on_update(self):
+        self.invalidate_source_tokens()
+
+    def invalidate_source_tokens(self):
+        """Drop every cached bearer token when these settings are saved.
+
+        A ``Login (Token)`` source caches its token in Redis until shortly before it
+        expires -- up to eight hours on the APIs seen so far. Nothing about changing the
+        username or secret evicts that entry, so without this a credential change appears
+        to do nothing: the scheduler keeps authenticating as the *previous* user until the
+        old token lapses, then starts failing with no obvious connection to the edit made
+        hours earlier.
+
+        Clearing all of them on save rather than diffing the rows: a Password field reads
+        back as a placeholder, so "did the secret change?" is not reliably answerable here,
+        and the cost of being wrong is one extra login.
+        """
+        from zatca_api.zatca_api.doctype.zatca_api_source.zatca_api_source import (
+            TOKEN_CACHE_PREFIX,
+        )
+
+        cache = frappe.cache()
+        for row in self.sources or []:
+            if row.source_name:
+                cache.delete_value(TOKEN_CACHE_PREFIX + cstr(row.source_name))
+
     def validate_wait_seconds(self):
         """Clamp the synchronous clearance wait so a caller cannot pin an HTTP worker."""
         seconds = cint(self.wait_for_zatca_seconds)
