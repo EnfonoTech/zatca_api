@@ -704,17 +704,17 @@
           }
         ],
         "url": {
-          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_credit_note",
+          "raw": "{{base_url}}/api/method/zatca_api.api.v1.create_invoice",
           "host": [
             "{{base_url}}"
           ],
           "path": [
             "api",
             "method",
-            "zatca_api.api.v1.create_credit_note"
+            "zatca_api.api.v1.create_invoice"
           ]
         },
-        "description": "A return against `{{last_invoice}}`, captured by an earlier request.\n\nSend `qty` positive \u2014 the sign is normalised. Expect `is_return: 1`, a negative quantity and a negative net total.\n\nCredits `{{last_b2b_invoice}}` and uses the **same customer** as that invoice. ERPNext validates that a return matches its original's customer, so crediting a B2B invoice as the B2C walk-in customer fails. It also sends `return_reason`, which ZATCA requires on a credit note (`BR-KSA-17`).",
+        "description": "A credit note is the same `create_invoice` endpoint: an invoice body plus `return_against` and `return_reason` - sending `return_against` is what makes it one.\n\nA return against `{{last_invoice}}`, captured by an earlier request.\n\nSend `qty` positive \u2014 the sign is normalised. Expect `is_return: 1`, a negative quantity and a negative net total.\n\nCredits `{{last_b2b_invoice}}` and uses the **same customer** as that invoice. ERPNext validates that a return matches its original's customer, so crediting a B2B invoice as the B2C walk-in customer fails. It also sends `return_reason`, which ZATCA requires on a credit note (`BR-KSA-17`).",
         "body": {
           "mode": "raw",
           "raw": "{\n  \"external_id\": \"CN-{{external_id}}\",\n  \"customer\": \"{{customer_b2b}}\",\n  \"company\": \"{{company}}\",\n  \"posting_date\": \"{{posting_date}}\",\n  \"return_against\": \"{{last_b2b_invoice}}\",\n  \"items\": [\n    {\n      \"item_code\": \"{{item_code}}\",\n      \"qty\": 1,\n      \"rate\": 250\n    }\n  ],\n  \"return_reason\": \"Two onsite days cancelled by the customer\",\n  \"tax_id\": \"{{buyer_vat}}\",\n  \"address_title\": \"{{customer_b2b}} Billing\",\n  \"address_parts\": {\n    \"street\": \"Olaya Street\",\n    \"building_number\": \"4521\",\n    \"district\": \"Al Murabba\",\n    \"city\": \"Riyadh\",\n    \"postal_code\": \"12613\",\n    \"country\": \"Saudi Arabia\"\n  }\n}",

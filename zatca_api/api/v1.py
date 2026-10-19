@@ -186,9 +186,14 @@ def _handle_guard_error(endpoint, exc, request_id, payload=None):
 
 @frappe.whitelist(methods=['POST'])
 def create_invoice(**kwargs):
-    """Create (and by default submit) a Sales Invoice, returning the ZATCA QR.
+    """Create (and by default submit) a Sales Invoice **or credit note**, returning the ZATCA QR.
 
-    Minimal body::
+    One endpoint for both. A credit note is the invoice body plus the two fields that make it
+    one: ``return_against`` (the invoice being corrected) and ``return_reason`` (why it was
+    issued, which ZATCA requires - BR-KSA-17). ``return_against`` alone is enough to make the
+    document a credit note; no separate flag or endpoint is needed.
+
+    Minimal invoice body::
 
         {
           "external_id": "INV-2026-0001",
@@ -198,24 +203,38 @@ def create_invoice(**kwargs):
           "items": [{"item_code": "SVC-01", "qty": 2, "rate": 500}]
         }
 
+    The same body as a credit note::
+
+        {
+          "external_id": "CN-2026-0001",
+          ...,
+          "items": [{"item_code": "SVC-01", "qty": 2, "rate": 500}],
+          "return_against": "INV-2026-0001",
+          "return_reason": "Two onsite days cancelled by the customer"
+        }
+
+    ``return_against`` takes the ERPNext invoice name or the ``external_id`` the original was
+    created with, and must reference a submitted invoice. Item quantities are
+    sign-normalised on a credit note, so send them positive.
+
     The response ``data`` carries ``invoice`` (all header, item and tax values) and
     ``zatca`` (phase, uuid, invoice hash, QR content and QR PNG).
     """
-    return _create(kwargs, is_return=False, endpoint='create_invoice')
+    return _create(kwargs, force_return=False, endpoint='create_invoice')
 
 
 @frappe.whitelist(methods=['POST'])
 def create_credit_note(**kwargs):
-    """Create a credit note (``is_return = 1``).
+    """Deprecated alias of ``create_invoice``, kept so existing integrations keep working.
 
-    Item quantities are sign-normalised, so send either positive or negative
-    figures. ``return_against`` is optional but, when given, must reference a
-    submitted Sales Invoice - ZATCA requires a credit note to identify its original.
+    It differs in one way: it treats the document as a credit note even when the body carries
+    neither ``return_against`` nor ``is_return``. New integrations should call
+    ``create_invoice`` and send ``return_against``.
     """
-    return _create(kwargs, is_return=True, endpoint='create_credit_note')
+    return _create(kwargs, force_return=True, endpoint='create_credit_note')
 
 
-def _create(kwargs: dict, is_return: bool, endpoint: str):
+def _create(kwargs: dict, force_return: bool, endpoint: str):
     request_id = new_request_id()
     started = time.monotonic()
     _reset_request_state()
@@ -228,7 +247,7 @@ def _create(kwargs: dict, is_return: bool, endpoint: str):
         return _handle_guard_error(endpoint, exc, request_id, raw)
 
     try:
-        payload = normalise_invoice(raw, is_return=is_return)
+        payload = normalise_invoice(raw, is_return=force_return)
         result, warnings = invoice_service.build_invoice(payload, settings)
 
         should_submit = payload['submit']
@@ -388,8 +407,10 @@ def validate_payload(document_type: str | None = None, **kwargs):
     could drift. The invoice is inserted as a draft only, never submitted, so no GL
     entry is written and nothing is filed with ZATCA.
 
-    Pass ``document_type: "Credit Note"`` to validate a return -- in the JSON body, or
-    as a query-string argument; both work.
+    A credit note is recognised exactly as on ``create_invoice``: from ``return_against``
+    (or ``is_return``) in the payload, so the body you will really send is all you need.
+    ``document_type: "Credit Note"`` -- in the JSON body or as a query-string argument --
+    still forces it, for a payload that carries neither.
 
     Requires the same Sales Invoice `create` permission as the real endpoint, so it
     cannot be used to probe the site anonymously.

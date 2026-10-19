@@ -141,16 +141,16 @@
         0,
         1
       ],
-      "description": "1 for a credit note."
+      "description": "Optional. A payload that carries return_against is already a credit note, so send this only for a credit note that has no original invoice to name."
     },
     "return_against": {
       "type": "string",
-      "description": "The original invoice a credit note refers to. Must already be submitted. ZATCA requires a credit note to identify its original."
+      "description": "Sending this makes the document a credit note: the same endpoint, the same body as an invoice, no separate flag. The invoice being corrected, by its ERPNext name (data.invoice.invoice from the response that created it) or by the external_id you sent for it. Must already be submitted. ZATCA requires a credit note to identify its original."
     },
     "return_reason": {
       "type": "string",
       "maxLength": 140,
-      "description": "Why the credit or debit note was issued. ZATCA rejects a credit note that does not state a reason (BR-KSA-17); it becomes the UBL InstructionNote. Falls back to remarks, then to a default."
+      "description": "Why the credit or debit note was issued. ZATCA rejects a credit note that does not state a reason (BR-KSA-17); it becomes the UBL InstructionNote. Also accepted as custom_return_reason, the ERPNext field name. Falls back to remarks, then to a default."
     },
     "is_debit_note": {
       "type": [
@@ -276,7 +276,7 @@
         "rate": {
           "type": "number",
           "minimum": 0,
-          "description": "Unit price excluding VAT. Never negative -- use is_return."
+          "description": "Unit price excluding VAT. Never negative -- for a credit note send return_against and a positive rate."
         },
         "uom": {
           "type": "string"

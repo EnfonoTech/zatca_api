@@ -93,6 +93,29 @@ def find_by_external_id(external_id: str, lock: bool = False) -> dict | None:
     )
 
 
+def resolve_return_against(payload: dict) -> None:
+    """Point ``return_against`` at the ERPNext invoice name, however the caller named it.
+
+    A feed knows an invoice by its *own* number -- the ``external_id`` it sent when it created
+    it -- and has no reason to keep the ``ACC-SINV-...`` name this site generated. So the
+    reference is accepted either way: an exact ERPNext name first, otherwise the external id
+    of an original (non-return) invoice.
+
+    A reference that matches neither is left exactly as sent, so ``validate_invoice`` rejects
+    it with its usual error rather than this function inventing a second one.
+    """
+    reference = cstr(payload.get('return_against') or '').strip()
+    if not (payload.get('is_return') and reference):
+        return
+
+    if frappe.db.exists('Sales Invoice', reference):
+        return
+
+    original = find_by_external_id(reference)
+    if original and not cint(original['is_return']):
+        payload['return_against'] = original['name']
+
+
 def _resolve_taxes(payload: dict, company: str, doc) -> list:
     """Return the rows for Sales Invoice.taxes, in precedence order.
 
@@ -501,6 +524,8 @@ def _reset_party_fields(doc, customer: str) -> None:
 
 def build_invoice(payload: dict, settings) -> tuple:
     """Create or update the Sales Invoice. Returns ``(InvoiceResult, warnings)``."""
+    # Before validation: validate_invoice checks the original by ERPNext name only.
+    resolve_return_against(payload)
     validate_invoice(payload)
 
     company = masters.ensure_company(payload, settings)

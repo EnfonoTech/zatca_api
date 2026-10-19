@@ -25,6 +25,7 @@ from zatca_api.services.invoice import (
     _apply_return_reason,
     _inherited_item_tax_templates,
     _reset_party_fields,
+    resolve_return_against,
 )
 from zatca_api.services.payload import PayloadError, normalise_invoice, validate_invoice
 
@@ -253,3 +254,48 @@ class TestPartyFieldsOnReusedDraft(FrappeTestCase):
         """A stale contact_person fails the same way customer_address does."""
         for field in ('contact_person', 'contact_email', 'contact_mobile'):
             self.assertIn(field, PARTY_DERIVED_FIELDS)
+
+
+class TestResolveReturnAgainst(FrappeTestCase):
+    """The feed names the original by ITS number; ERPNext needs ours."""
+
+    def _resolve(self, payload, name_exists=False, by_external_id=None):
+        with (
+            patch('zatca_api.services.invoice.frappe.db.exists', return_value=name_exists),
+            patch('zatca_api.services.invoice.find_by_external_id', return_value=by_external_id) as lookup,
+        ):
+            resolve_return_against(payload)
+        return payload, lookup
+
+    def test_an_erpnext_name_is_left_alone(self):
+        payload, lookup = self._resolve(
+            {'is_return': 1, 'return_against': 'ACC-SINV-2026-00051'}, name_exists=True
+        )
+        self.assertEqual(payload['return_against'], 'ACC-SINV-2026-00051')
+        lookup.assert_not_called()
+
+    def test_an_external_id_is_swapped_for_the_erpnext_name(self):
+        original = {'name': 'ACC-SINV-2026-00051', 'docstatus': 1, 'is_return': 0, 'grand_total': 115}
+        payload, lookup = self._resolve({'is_return': 1, 'return_against': 'E014'}, by_external_id=original)
+        self.assertEqual(payload['return_against'], 'ACC-SINV-2026-00051')
+        lookup.assert_called_once_with('E014')
+
+    def test_an_external_id_that_belongs_to_a_credit_note_is_not_an_original(self):
+        credit_note = {'name': 'ACC-SINV-2026-00060', 'docstatus': 1, 'is_return': 1, 'grand_total': -115}
+        payload, _ = self._resolve({'is_return': 1, 'return_against': 'CN-1'}, by_external_id=credit_note)
+        self.assertEqual(payload['return_against'], 'CN-1')
+
+    def test_a_reference_that_matches_nothing_is_left_as_sent(self):
+        """validate_invoice then rejects it with its own error."""
+        payload, _ = self._resolve({'is_return': 1, 'return_against': 'NOPE'})
+        self.assertEqual(payload['return_against'], 'NOPE')
+
+    def test_nothing_is_looked_up_for_a_document_that_is_not_a_return(self):
+        """A debit note also carries return_against, and must not be rewritten."""
+        payload, lookup = self._resolve({'is_return': 0, 'is_debit_note': 1, 'return_against': 'E014'})
+        self.assertEqual(payload['return_against'], 'E014')
+        lookup.assert_not_called()
+
+    def test_a_blank_reference_is_not_looked_up(self):
+        payload, lookup = self._resolve({'is_return': 1, 'return_against': '  '})
+        lookup.assert_not_called()

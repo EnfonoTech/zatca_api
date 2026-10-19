@@ -121,6 +121,7 @@
   <a href="#envelope">Response envelope</a>
   <a href="#zatca">The zatca block</a>
   <a href="#endpoints">Endpoints</a>
+  <a href="#creditnotes">Credit notes</a>
   <a href="#payload">Invoice payload</a>
   <a href="#tax">Taxes</a>
   <a href="#errors">Error codes</a>
@@ -305,8 +306,10 @@ your own tests.</p>
 the database</strong>, so they can run it against the live site as often as they like
 while iterating.</p>
 <pre><code>POST /api/method/zatca_api.api.v1.validate_payload</code></pre>
-<p>Send exactly the invoice JSON you intend to send for real. Add
-<code>?document_type=Credit Note</code> for a return.</p>
+<p>Send exactly the JSON you intend to send for real. A credit note is recognised the same
+way as on <code>create_invoice</code> &mdash; from <code>return_against</code> &mdash; so no
+extra argument is needed. <code>?document_type=Credit Note</code> still forces it for a payload
+that carries neither <code>return_against</code> nor <code>is_return</code>.</p>
 <div class="scroll"><table>
 <thead><tr><th>Response key</th><th>What it tells you</th></tr></thead>
 <tbody>
@@ -444,9 +447,7 @@ company has no ZATCA settings, or <code>ksa_compliance</code> is not installed.
 <tr><td><span class="badge b-post">POST</span></td><td><code>validate_payload</code></td>
     <td><strong>Dry run</strong> — validate and report, writing nothing</td></tr>
 <tr><td><span class="badge b-post">POST</span></td><td><code>create_invoice</code></td>
-    <td>Create (and submit) an invoice, return the QR</td></tr>
-<tr><td><span class="badge b-post">POST</span></td><td><code>create_credit_note</code></td>
-    <td>Create a return / credit note</td></tr>
+    <td>Create (and submit) an invoice <strong>or credit note</strong>, return the QR</td></tr>
 <tr><td><span class="badge b-post">POST</span></td><td><code>submit_invoice</code></td>
     <td>Submit an existing draft</td></tr>
 <tr><td><span class="badge b-post">POST</span></td><td><code>resubmit_to_zatca</code></td>
@@ -464,6 +465,48 @@ company has no ZATCA settings, or <code>ksa_compliance</code> is not installed.
 </tbody></table></div>
 <p>A wrong HTTP verb returns <strong>403</strong>, not 405 &mdash; that is Frappe's
 behaviour.</p>
+
+<h3 id="creditnotes">Credit notes &mdash; the same <code>create_invoice</code></h3>
+<p>There is no separate endpoint. A credit note is <strong>the invoice body plus two
+fields</strong>:</p>
+<div class="scroll"><table>
+<thead><tr><th>Extra field</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>return_against</code></td>
+    <td>The invoice being corrected. Sending it is what makes the document a credit note
+        &mdash; no flag, no second endpoint.</td></tr>
+<tr><td><code>return_reason</code><br><small>custom_return_reason</small></td>
+    <td>Why the note was issued. <strong>ZATCA requires one</strong>
+        (<code>BR-KSA-17</code>).</td></tr>
+</tbody></table></div>
+<pre><code>{
+  "external_id": "CN-2026-0007",
+  "customer": "Al Rajhi Trading",
+  "company": "Enfono KSA",
+  "items": [ { "item_code": "SVC-01", "qty": 2, "rate": 500 } ],
+  "return_against": "INV-2026-0001",
+  "return_reason": "Two onsite days cancelled by the customer"
+}</code></pre>
+<ul>
+<li><code>return_against</code> takes <strong>either</strong> the ERPNext invoice name
+    (<code>data.invoice.invoice</code> from the response that created the original)
+    <strong>or the <code>external_id</code> you sent for it</strong> &mdash; the name is tried
+    first. It must reference a <strong>submitted</strong> invoice.</li>
+<li>Quantities are sign-normalised &mdash; send them positive; negative works too.</li>
+<li><code>external_id</code> must be new. Reusing the invoice's id returns that invoice as a
+    duplicate.</li>
+<li>The response is the ordinary invoice response: <code>invoice.is_return</code> is
+    <code>1</code>, and quantities and totals are negative.</li>
+<li><code>"is_return": 1</code> is still accepted &mdash; needed only for a credit note with no
+    original invoice to name. A debit note (<code>is_debit_note</code>) is
+    <strong>not</strong> turned into a credit note by <code>return_against</code>.</li>
+</ul>
+<div class="note">
+<p><strong><code>create_credit_note</code> is deprecated.</strong> It remains as an alias so
+existing integrations keep working, and differs only in treating the document as a credit
+note even when <code>return_against</code> and <code>is_return</code> are both absent. New
+integrations should call <code>create_invoice</code>.</p>
+</div>
 
 <h3>Lookups</h3>
 <p><code>get_invoice</code>, <code>get_status</code>, <code>submit_invoice</code> and
@@ -540,10 +583,17 @@ and <code>CUSTOMER_NAME</code> all resolve. Aliases are listed in parentheses.</
     <td>Supplies the ZATCA payment means code.
         <strong>Requires <code>is_pos: 1</code></strong> &mdash; see Taxes &amp;
         payment means.</td></tr>
-<tr><td><code>is_return</code>, <code>return_against</code>,
-        <code>is_debit_note</code></td>
-    <td><code>return_against</code> must reference a <strong>submitted</strong>
-        invoice.</td></tr>
+<tr><td><code>return_against</code><br><small>against_invoice, original_invoice</small></td>
+    <td>The invoice being corrected. <strong>Sending it makes the document a credit
+        note.</strong> The ERPNext name or the original's <code>external_id</code>; must be
+        <strong>submitted</strong>.</td></tr>
+<tr><td><code>return_reason</code><br><small>reason, credit_note_reason,
+        custom_return_reason</small></td>
+    <td>Why the note was issued. ZATCA requires one (<code>BR-KSA-17</code>). Max 140
+        characters.</td></tr>
+<tr><td><code>is_return</code>, <code>is_debit_note</code></td>
+    <td><code>is_return</code> is optional &mdash; <code>return_against</code> already implies
+        it.</td></tr>
 <tr><td><code>submit</code></td>
     <td>Overrides the Auto Submit setting for this one request.</td></tr>
 </tbody></table></div>
@@ -558,7 +608,7 @@ and <code>CUSTOMER_NAME</code> all resolve. Aliases are listed in parentheses.</
     <td>Defaults to 1 when absent. An explicit <code>0</code> is
         <strong>rejected</strong>, not silently changed to 1.</td></tr>
 <tr><td><code>rate</code> <small>(price, unit_price)</small></td>
-    <td>Must not be negative &mdash; use <code>is_return</code> for credit notes.</td></tr>
+    <td>Must not be negative &mdash; for a credit note send <code>return_against</code> and a positive rate.</td></tr>
 <tr><td><code>uom</code> <small>(unit, unit_of_measure)</small></td>
     <td>Conversion factor resolved automatically.</td></tr>
 <tr><td><code>item_tax_template</code></td>
@@ -846,6 +896,10 @@ no-op while disabled. Trigger one immediately with <code>pull_now</code>.</p>
 <div class="scroll"><table>
 <thead><tr><th>Field</th><th>Notes</th></tr></thead>
 <tbody>
+<tr><td>Document Type</td>
+    <td>Sales Invoice or Credit Note. A feed that mixes both can stay Sales Invoice: any
+        record carrying <code>return_against</code> is imported as a credit note. Credit Note
+        treats every record as one.</td></tr>
 <tr><td>Endpoint URL</td><td>Must be http:// or https://.</td></tr>
 <tr><td>Auth Type</td><td>None, Header Key, Bearer Token, Basic.</td></tr>
 <tr><td>Secret / API Key</td>

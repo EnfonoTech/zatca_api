@@ -64,7 +64,8 @@ def _existing_masters(payload: dict) -> dict:
 def dry_run(raw: dict, settings, is_return: bool = False) -> dict:
     """Validate ``raw`` and report. Returns a plain dict; never raises PayloadError.
 
-    Guaranteed to leave the database exactly as it found it.
+    ``is_return`` forces credit-note treatment, as it does for ``normalise_invoice``; without
+    it the payload decides. Guaranteed to leave the database exactly as it found it.
     """
     report = {
         'valid': False,
@@ -85,6 +86,14 @@ def dry_run(raw: dict, settings, is_return: bool = False) -> dict:
         report['errors'].append(item_error(exc.code, exc.message, exc.details))
         return report
 
+    # The payload decides what this is, not only the caller's flag: naming the invoice it
+    # corrects (return_against) is enough to make it a credit note.
+    report['document_type'] = 'Credit Note' if payload.get('is_return') else 'Sales Invoice'
+
+    # A read-only lookup. It turns an external id into the ERPNext invoice name, so the
+    # report can show which original the vendor's reference resolved to.
+    invoice_service.resolve_return_against(payload)
+
     report['resolved'] = {
         'external_id': payload.get('external_id'),
         'customer': payload.get('customer'),
@@ -93,6 +102,8 @@ def dry_run(raw: dict, settings, is_return: bool = False) -> dict:
         'item_count': len(payload.get('items') or []),
         'is_return': bool(payload.get('is_return')),
     }
+    if payload.get('is_return'):
+        report['resolved']['return_against'] = payload.get('return_against') or None
     report['would_create'] = _existing_masters(payload)
 
     existing = invoice_service.find_by_external_id(payload.get('external_id'))

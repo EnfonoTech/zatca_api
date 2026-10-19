@@ -442,8 +442,9 @@ Corrections happen by credit note &mdash; never by re-sending a changed invoice.
 <thead><tr><th>Field</th><th>Why you need it</th></tr></thead>
 <tbody>
 <tr><td><code>data.invoice.invoice</code></td>
-    <td><strong>Store this.</strong> The ERPNext invoice name. Required later as
-        <code>return_against</code> on a credit note.</td></tr>
+    <td>The ERPNext invoice name &mdash; worth keeping for support and look-ups. A credit note&rsquo;s
+        <code>return_against</code> accepts it, <em>or</em> the <code>external_id</code> you sent
+        for the original, so storing it is not required.</td></tr>
 <tr><td><code>data.zatca.qr_png_base64</code></td>
     <td>The ZATCA QR, base64 PNG. Put it straight on your printed or PDF invoice:
         <code>&lt;img src="data:image/png;base64,…"&gt;</code></td></tr>
@@ -1309,6 +1310,7 @@ that is not exactly 5, or a missing district. Run <code>validate_payload</code> 
 <div class="danger"><p><strong>The trap that rejected our first attempt.</strong> The two lines must use <strong>different <code>item_code</code> values</strong>. ERPNext keys its per-line tax detail by item code, so sending the same code twice with two different templates collapses them, and the standard-rated subtotal reaches ZATCA with a tax amount of <code>0.0</code> while the header still says 150. ZATCA rejects it with <code>BR-CO-14</code> and <code>BR-CO-15</code>. One item code per VAT category per invoice.</p></div>
 <h3>D &middot; Credit note &mdash; against a cleared invoice</h3>
 <p><strong>What it proves.</strong> Quantities and totals come back negative, the ZATCA counter advances, and <code>return_reason</code> is echoed so you can confirm the reason ZATCA requires actually reached the XML.</p>
+<p>It goes to the <strong>same <code>create_invoice</code> endpoint</strong> as examples A to C. The body is an invoice body plus <code>return_against</code> and <code>return_reason</code>; nothing else marks it as a credit note.</p>
 <p>This one also shows the <strong>two-step flow</strong>: the create call returns a <em>draft</em> (<code>"submitted": false</code>, no QR yet), then a separate <code>submit_invoice</code> call posts it and files it with ZATCA. Send <code>"submit": true</code> on the create call to do both at once, as examples A to C do.</p>
 <p class="lbl">Request</p>
 <pre><code>{
@@ -1902,7 +1904,8 @@ canonical &mdash; build to these.</p>
 <tr><td><code>address_parts</code></td><td>Buyer address. Mandatory for B2B &mdash; see below.</td></tr>
 <tr><td><code>taxes</code> / <code>tax_template</code></td><td>Omit to use the company default.</td></tr>
 <tr><td><code>po_no</code>, <code>remarks</code>, <code>project</code>, <code>cost_center</code></td><td>Pass-through.</td></tr>
-<tr><td><code>is_return</code>, <code>return_against</code></td><td>Credit notes.</td></tr>
+<tr><td><code>return_against</code></td><td>The invoice a credit note corrects. <strong>Sending it makes the document a credit note</strong> &mdash; no flag, no separate endpoint. The ERPNext invoice name, or the <code>external_id</code> you sent for the original.</td></tr>
+<tr><td><code>is_return</code></td><td>Optional &mdash; <code>return_against</code> already implies it. Needed only for a credit note with no original to name.</td></tr>
 <tr><td><code>return_reason</code></td><td>Why the credit note was issued. <strong>ZATCA rejects a credit note with no reason</strong> (<code>BR-KSA-17</code>); we fall back to <code>remarks</code>, then to a default.</td></tr>
 <tr><td><code>submit</code></td><td>Send <code>false</code> to leave it as a draft. No QR is produced then.</td></tr>
 </tbody></table></div>
@@ -1913,7 +1916,7 @@ canonical &mdash; build to these.</p>
 <tbody>
 <tr><td><code>item_code</code></td><td><strong>Required, and must be stable</strong> &mdash; it becomes the ERPNext item.</td></tr>
 <tr><td><code>qty</code></td><td>Must not be <code>0</code>. A zero line is rejected, not silently changed to 1.</td></tr>
-<tr><td><code>rate</code></td><td><strong>Excluding VAT.</strong> Never negative &mdash; use <code>is_return</code>.</td></tr>
+<tr><td><code>rate</code></td><td><strong>Excluding VAT.</strong> Never negative &mdash; for a credit note send <code>return_against</code> and a positive rate.</td></tr>
 <tr><td><code>item_name</code></td><td>Send it the first time we see a code, so the item is created with a real name.</td></tr>
 <tr><td><code>uom</code></td><td>Tell us your list up front so we can pre-create them.</td></tr>
 <tr><td><code>item_tax_template</code></td><td><strong>Required on mixed-rate invoices</strong> &mdash; and each category needs its own <code>item_code</code>. See below.</td></tr>
@@ -1997,7 +2000,8 @@ refuse a future date at the door instead. Backdating is fine.</p>
 
 <section id="creditnote">
 <h2>Credit notes</h2>
-<pre><code>POST /api/method/zatca_api.api.v1.create_credit_note</code></pre>
+<pre><code>POST /api/method/zatca_api.api.v1.create_invoice</code></pre>
+<p>The <strong>same endpoint as an invoice</strong>. A credit note is the invoice body plus two fields: <code>return_against</code> &mdash; the invoice being corrected, which is what makes it a credit note &mdash; and <code>return_reason</code> (also accepted as <code>custom_return_reason</code>). There is no separate credit-note endpoint and no flag to set.</p>
 
 <div class="danger">
 <p><strong>A credit note must state why it was issued.</strong> ZATCA rejects one that does
@@ -2107,9 +2111,10 @@ element of the XML. Send <code>return_reason</code>.</p>
 <li>Send <code>qty</code> as the quantity being returned. <strong>Positive or negative both
     work</strong> &mdash; we normalise the sign. Note the response shows
     <code>-2.0</code>.</li>
-<li><code>return_against</code> is the <strong>ERPNext invoice name</strong> we gave you
-    when the original was created &mdash; not your own reference. This is why you store
-    <code>data.invoice.invoice</code>.</li>
+<li><code>return_against</code> names the original invoice: either the <strong>ERPNext
+    invoice name</strong> we gave you (<code>data.invoice.invoice</code>) <strong>or the
+    <code>external_id</code> you sent for it</strong>. The name is tried first, so you do not
+    have to store ours.</li>
 <li><code>return_reason</code> is echoed back, so you can assert that the reason you sent is
     the reason on the filing.</li>
 <li>The original invoice must be <strong>submitted</strong>. A credit note against a draft
@@ -2119,6 +2124,13 @@ element of the XML. Send <code>return_reason</code>.</p>
 <li><code>external_id</code> must be unique for the credit note too &mdash; do not reuse the
     original invoice&rsquo;s id.</li>
 </ul>
+
+<div class="note">
+<p><strong><code>create_credit_note</code> is deprecated.</strong> It remains as an alias so
+existing integrations keep working, and differs only in treating the document as a credit
+note even when <code>return_against</code> and <code>is_return</code> are both absent. New
+integrations should call <code>create_invoice</code>.</p>
+</div>
 </section>
 
 <section id="errors">
@@ -2310,7 +2322,7 @@ items behind.</p>
         else:
             alert with r.request_id
 
-    save local_invoice.erp_name  = r.data.invoice.invoice     # for credit notes
+    save local_invoice.erp_name  = r.data.invoice.invoice     # optional: return_against takes it, or your external_id
     save local_invoice.qr_base64 = r.data.zatca.qr_png_base64 # for the PDF
     save local_invoice.warnings  = r.warnings
 
@@ -2397,8 +2409,8 @@ invoice of each kind you tested.</p>
 <li><code>building_number</code> and <code>postal_code</code> are sent as strings</li>
 <li><code>rate</code> excludes VAT</li>
 <li>Mixed VAT rates send <code>item_tax_template</code> per line</li>
-<li>Credit notes send <code>is_return: 1</code> and <code>return_against</code></li>
-<li>You store <code>data.invoice.invoice</code> against your local record</li>
+<li>Credit notes go to <code>create_invoice</code> and send <code>return_against</code> and <code>return_reason</code></li>
+<li>You can tie your record to ours: <code>data.invoice.invoice</code>, or simply your own <code>external_id</code>, which <code>return_against</code> also accepts</li>
 <li>The QR is rendered on your invoice output</li>
 <li><code>warnings</code> are logged, not discarded</li>
 <li>Item codes and your UOM list shared with us so masters can be pre-created</li>

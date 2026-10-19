@@ -190,6 +190,40 @@ class TestDryRunReport(ZATCAAPITestCase):
         self.assertTrue(response['data']['resolved']['is_return'])
         self.assertEqual(response['data']['totals']['net_total'], -300.0)
 
+    def test_return_against_alone_reports_a_credit_note(self):
+        """No document_type and no is_return: the body you will really send is enough."""
+        original = v1.create_invoice(**_payload('DRY-CN-ORIG'))
+        original_name = original['data']['invoice']['invoice']
+        invoice_service.submit_invoice(original_name)
+
+        response = v1.validate_payload(
+            **_payload(
+                'DRY-CN-004',
+                return_against='DRY-CN-ORIG',
+                custom_return_reason='returning',
+                items=[{'item_code': TEST_ITEM, 'qty': 1, 'rate': 100}],
+            )
+        )
+        data = response['data']
+        self.assertEqual(data['document_type'], 'Credit Note')
+        self.assertTrue(data['valid'], msg=data['errors'])
+        self.assertTrue(data['resolved']['is_return'])
+        # The vendor's own number is shown resolved to the ERPNext invoice it matched.
+        self.assertEqual(data['resolved']['return_against'], original_name)
+        self.assertEqual(data['totals']['net_total'], -100.0)
+
+    def test_unknown_return_against_is_reported_not_raised(self):
+        response = v1.validate_payload(**_payload('DRY-CN-005', return_against='DRY-NOT-THERE'))
+        data = response['data']
+        self.assertFalse(data['valid'])
+        self.assertEqual(data['document_type'], 'Credit Note')
+        self.assertIn('does not exist', data['errors'][0]['message'])
+
+    def test_a_plain_invoice_report_has_no_return_against(self):
+        """Keeps the documented response shape of the common case unchanged."""
+        response = v1.validate_payload(**_payload('DRY-CN-006'))
+        self.assertNotIn('return_against', response['data']['resolved'])
+
     def test_document_type_does_not_leak_into_the_invoice(self):
         payload = _payload('DRY-CN-003')
         payload['document_type'] = 'Sales Invoice'

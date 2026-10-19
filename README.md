@@ -55,8 +55,7 @@ curl -H "Authorization: token <api_key>:<api_secret>" \
 | Method | Endpoint | Purpose |
 |---|---|---|
 | POST | `zatca_api.api.v1.validate_payload` | **Dry run** — validate, writing nothing |
-| POST | `zatca_api.api.v1.create_invoice` | Create + submit an invoice, return the QR |
-| POST | `zatca_api.api.v1.create_credit_note` | Create a credit note (`is_return`) |
+| POST | `zatca_api.api.v1.create_invoice` | Create + submit an invoice **or credit note**, return the QR |
 | POST | `zatca_api.api.v1.submit_invoice` | Submit an existing draft |
 | POST | `zatca_api.api.v1.resubmit_to_zatca` | Retry a Rejected / Resend filing |
 | GET | `zatca_api.api.v1.get_invoice` | One invoice + its ZATCA block |
@@ -64,6 +63,10 @@ curl -H "Authorization: token <api_key>:<api_secret>" \
 | GET | `zatca_api.api.v1.list_invoices` | Paginated list |
 | GET | `zatca_api.api.v1.ping` | Health and capability probe |
 | POST | `zatca_api.api.v1.pull_now` | Trigger a configured pull source |
+
+**One endpoint for invoices and credit notes.** A credit note is the invoice body plus
+`return_against` (the invoice it corrects) and `return_reason` (why — ZATCA requires it).
+`create_credit_note` still works as a deprecated alias.
 
 Full request/response reference, error codes and worked examples:
 **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)**, also served from the site at

@@ -144,7 +144,7 @@ class TestSamplesMatchTheApp(FrappeTestCase):
         for path in _samples():
             with self.subTest(sample=path.name):
                 raw = json.loads(path.read_text())
-                payload = normalise_invoice(raw, is_return=bool(raw.get('is_return')))
+                payload = normalise_invoice(raw)
                 self.assertTrue(payload['external_id'])
                 self.assertTrue(payload['customer'])
                 self.assertTrue(payload['items'])
@@ -164,10 +164,18 @@ class TestSamplesMatchTheApp(FrappeTestCase):
 
     def test_credit_note_sample_produces_negative_quantities(self):
         raw = json.loads((SAMPLE_DIR / 'credit-note.json').read_text())
-        payload = normalise_invoice(raw, is_return=True)
+        # No force flag: the sample alone has to be recognised as a credit note.
+        payload = normalise_invoice(raw)
         self.assertEqual(payload['is_return'], 1)
         for row in payload['items']:
             self.assertLess(row['qty'], 0)
+
+    def test_credit_note_sample_is_the_invoice_sample_plus_the_return_fields(self):
+        """The contract promises one body for both documents. Hold the sample to it."""
+        credit_note = json.loads((SAMPLE_DIR / 'credit-note.json').read_text())
+        self.assertIn('return_against', credit_note)
+        self.assertIn('return_reason', credit_note)
+        self.assertNotIn('is_return', credit_note)
 
     def test_address_aliases_in_samples_resolve_to_the_zatca_fields(self):
         raw = json.loads((SAMPLE_DIR / 'standard-b2b.json').read_text())

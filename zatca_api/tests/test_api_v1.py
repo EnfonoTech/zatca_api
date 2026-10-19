@@ -579,6 +579,87 @@ class TestCreditNote(ZATCAAPITestCase):
         self.assertFalse(response['success'])
         self.assertIn('not submitted', response['errors'][0]['message'])
 
+    def _submitted_original(self, external_id):
+        original = v1.create_invoice(**_payload(external_id))
+        name = original['data']['invoice']['invoice']
+        invoice_service.submit_invoice(name)
+        return name
+
+    def test_create_invoice_with_return_against_is_a_credit_note(self):
+        """One endpoint: the invoice body plus return_against and custom_return_reason.
+
+        No is_return, no document type, no second endpoint.
+        """
+        original_name = self._submitted_original('ZAPI-CN-ONE-ORIG')
+
+        response = v1.create_invoice(
+            **_payload(
+                'ZAPI-CN-ONE',
+                return_against=original_name,
+                custom_return_reason='returning',
+                items=[{'item_code': TEST_ITEM, 'qty': 1, 'rate': 100}],
+            )
+        )
+        self.assertTrue(response['success'], msg=response.get('errors'))
+        invoice = response['data']['invoice']
+        self.assertEqual(invoice['is_return'], 1)
+        self.assertEqual(invoice['return_against'], original_name)
+        self.assertEqual(invoice['return_reason'], 'returning')
+        self.assertEqual(invoice['items'][0]['qty'], -1.0)
+        self.assertEqual(invoice['net_total'], -100.0)
+
+    def test_return_against_accepts_the_originals_external_id(self):
+        """The feed knows the original by its own number, not by our ACC-SINV name."""
+        original_name = self._submitted_original('ZAPI-CN-EXT-ORIG')
+
+        response = v1.create_invoice(
+            **_payload(
+                'ZAPI-CN-EXT',
+                return_against='ZAPI-CN-EXT-ORIG',
+                items=[{'item_code': TEST_ITEM, 'qty': 1, 'rate': 100}],
+            )
+        )
+        self.assertTrue(response['success'], msg=response.get('errors'))
+        self.assertEqual(response['data']['invoice']['is_return'], 1)
+        self.assertEqual(response['data']['invoice']['return_against'], original_name)
+
+    def test_external_id_of_a_draft_original_is_refused(self):
+        v1.create_invoice(**_payload('ZAPI-CN-EXT-DRAFT'))
+
+        response = v1.create_invoice(**_payload('ZAPI-CN-EXT-DRAFT-CN', return_against='ZAPI-CN-EXT-DRAFT'))
+        self.assertFalse(response['success'])
+        self.assertIn('not submitted', response['errors'][0]['message'])
+
+    def test_unknown_return_against_is_refused_and_writes_nothing(self):
+        response = v1.create_invoice(**_payload('ZAPI-CN-NOPE', return_against='ZAPI-DOES-NOT-EXIST'))
+        self.assertFalse(response['success'])
+        self.assertIn('does not exist', response['errors'][0]['message'])
+        self.assertIsNone(invoice_service.find_by_external_id('ZAPI-CN-NOPE'))
+
+    def test_the_deprecated_endpoint_builds_the_same_document(self):
+        original_name = self._submitted_original('ZAPI-CN-ALIAS-ORIG')
+
+        response = v1.create_credit_note(
+            **_payload(
+                'ZAPI-CN-ALIAS',
+                return_against='ZAPI-CN-ALIAS-ORIG',
+                items=[{'item_code': TEST_ITEM, 'qty': 1, 'rate': 100}],
+            )
+        )
+        self.assertTrue(response['success'], msg=response.get('errors'))
+        invoice = response['data']['invoice']
+        self.assertEqual(invoice['is_return'], 1)
+        self.assertEqual(invoice['return_against'], original_name)
+        self.assertEqual(invoice['items'][0]['qty'], -1.0)
+
+    def test_an_invoice_with_no_return_fields_stays_an_invoice(self):
+        response = v1.create_invoice(**_payload('ZAPI-CN-PLAIN'))
+        self.assertTrue(response['success'], msg=response.get('errors'))
+        invoice = response['data']['invoice']
+        self.assertEqual(invoice['is_return'], 0)
+        self.assertFalse(invoice['return_against'])
+        self.assertEqual(invoice['items'][0]['qty'], 2.0)
+
 
 class TestValidationErrors(ZATCAAPITestCase):
     def test_missing_customer_returns_400_with_field_details(self):

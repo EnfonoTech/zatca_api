@@ -126,6 +126,68 @@ class TestQuantityHandling(FrappeTestCase):
         self.assertEqual(payload['items'][0]['qty'], -4.0)
 
 
+class TestCreditNoteDetection(FrappeTestCase):
+    """A credit note is an invoice plus return_against, so one endpoint can take both."""
+
+    def _raw(self, **extra):
+        raw = {'external_id': 'CN-9', 'customer': 'C', 'items': [{'item_code': 'I', 'qty': 5, 'rate': 10}]}
+        raw.update(extra)
+        return raw
+
+    def test_return_against_alone_makes_it_a_credit_note(self):
+        payload = normalise_invoice(self._raw(return_against='ACC-SINV-2026-00001'))
+        self.assertEqual(payload['is_return'], 1)
+        self.assertEqual(payload['return_against'], 'ACC-SINV-2026-00001')
+        self.assertEqual(payload['items'][0]['qty'], -5.0)
+
+    def test_the_aliases_of_return_against_count_too(self):
+        for alias in ('return_against', 'against_invoice', 'original_invoice'):
+            with self.subTest(alias=alias):
+                payload = normalise_invoice(self._raw(**{alias: 'E014'}))
+                self.assertEqual(payload['is_return'], 1)
+                self.assertEqual(payload['return_against'], 'E014')
+
+    def test_invoice_body_plus_return_against_and_custom_return_reason(self):
+        """The whole difference between the two documents is these two keys."""
+        payload = normalise_invoice(self._raw(return_against='E014', custom_return_reason='returning'))
+        self.assertEqual(payload['is_return'], 1)
+        self.assertEqual(payload['return_reason'], 'returning')
+
+    def test_a_plain_invoice_stays_an_invoice(self):
+        payload = normalise_invoice(self._raw())
+        self.assertEqual(payload['is_return'], 0)
+        self.assertEqual(payload['items'][0]['qty'], 5.0)
+
+    def test_an_empty_return_against_is_not_a_credit_note(self):
+        """A feed that carries the key on every record must not turn invoices into returns."""
+        for empty in ('', None, '   '):
+            with self.subTest(empty=empty):
+                payload = normalise_invoice(self._raw(return_against=empty, return_reason=empty))
+                self.assertEqual(payload['is_return'], 0)
+                self.assertEqual(payload['items'][0]['qty'], 5.0)
+
+    def test_is_return_without_an_original_is_still_a_credit_note(self):
+        payload = normalise_invoice(self._raw(is_return=1))
+        self.assertEqual(payload['is_return'], 1)
+        self.assertEqual(payload['return_against'], '')
+        self.assertEqual(payload['items'][0]['qty'], -5.0)
+
+    def test_a_debit_note_is_not_mistaken_for_a_credit_note(self):
+        """ERPNext links a debit note to its original through return_against as well, and
+        is_return / is_debit_note are mutually exclusive on the form: it must not come out
+        negative."""
+        payload = normalise_invoice(self._raw(is_debit_note=1, return_against='ACC-SINV-2026-00001'))
+        self.assertEqual(payload['is_return'], 0)
+        self.assertEqual(payload['is_debit_note'], 1)
+        self.assertEqual(payload['items'][0]['qty'], 5.0)
+
+    def test_the_force_flag_still_forces(self):
+        """The deprecated create_credit_note and 'Credit Note' pull sources rely on it."""
+        payload = normalise_invoice(self._raw(), is_return=True)
+        self.assertEqual(payload['is_return'], 1)
+        self.assertEqual(payload['items'][0]['qty'], -5.0)
+
+
 class TestJsonStringDecoding(FrappeTestCase):
     def test_items_sent_as_json_string(self):
         """Form-encoded requests deliver nested structures as strings."""

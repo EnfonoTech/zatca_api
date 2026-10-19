@@ -229,8 +229,7 @@ Base path: `https://<site>/api/method/zatca_api.api.v1.`
 | Method | Endpoint | Purpose |
 |---|---|---|
 | POST | `validate_payload` | **Dry run** — validate and report, writing nothing |
-| POST | `create_invoice` | Create (+submit) an invoice, return the QR |
-| POST | `create_credit_note` | Create a return / credit note |
+| POST | `create_invoice` | Create (+submit) an invoice **or credit note**, return the QR |
 | POST | `submit_invoice` | Submit an existing draft |
 | POST | `resubmit_to_zatca` | Retry a Rejected / Resend filing |
 | GET | `get_invoice` | One invoice + ZATCA block |
@@ -240,6 +239,9 @@ Base path: `https://<site>/api/method/zatca_api.api.v1.`
 | POST | `pull_now` | Trigger a configured pull source |
 
 A wrong HTTP verb returns **403**, not 405 — that is Frappe's behaviour.
+
+Credit notes go through `create_invoice` too — see [Credit notes](#credit-notes--the-same-create_invoice).
+The older `create_credit_note` endpoint still works as a deprecated alias.
 
 ### `validate_payload` — dry run
 
@@ -253,9 +255,11 @@ curl -X POST "https://<site>/api/method/zatca_api.api.v1.validate_payload" \
   -d @invoice.json
 ```
 
-Add `"document_type": "Credit Note"` to the body, or `?document_type=Credit%20Note`
-on the URL — both work. (Frappe discards the query string when a JSON body is
-present, so this endpoint reads it off the request directly.)
+A credit note is recognised exactly as on `create_invoice` — from `return_against` in
+the body — so send precisely what you will send for real. `"document_type": "Credit Note"`
+(in the body, or as `?document_type=Credit%20Note` on the URL) still forces it for a
+payload that carries neither `return_against` nor `is_return`. (Frappe discards the query
+string when a JSON body is present, so this endpoint reads it off the request directly.)
 
 Response `data`:
 
@@ -326,18 +330,50 @@ Response `data`:
 `conversion_rate`, `net_total`, `total_taxes_and_charges`, `grand_total`,
 `rounded_total`, `outstanding_amount`, `project`, plus `items[]` and `taxes[]`.
 
-### `create_credit_note`
+### Credit notes — the same `create_invoice`
 
-Same payload with `is_return` implied. Quantities are **sign-normalised** — send
-positive or negative, either works. `return_against` is optional but, when
-supplied, must reference a **submitted** Sales Invoice (ZATCA requires a credit
-note to identify its original).
+There is no separate endpoint. A credit note is **the invoice body plus two fields**:
+
+| Extra field | Meaning |
+|---|---|
+| `return_against` | The invoice being corrected. Sending it is what makes the document a credit note — no flag, no second endpoint. |
+| `return_reason` | Why the note was issued. Also accepted as `custom_return_reason`, the ERPNext field name. |
+
+```json
+{
+  "external_id": "CN-2026-0007",
+  "customer": "Al Rajhi Trading",
+  "company": "Enfono KSA",
+  "items": [{"item_code": "SVC-01", "qty": 2, "rate": 500}],
+  "return_against": "INV-2026-0001",
+  "return_reason": "Two onsite days cancelled by the customer"
+}
+```
+
+- `return_against` takes **either** the ERPNext invoice name (`data.invoice.invoice` from the
+  response that created the original) **or the `external_id` you sent for it** — the name is
+  tried first. It must reference a **submitted** invoice: ZATCA requires a credit note to
+  identify its original. You do not have to store our invoice names.
+- Quantities are **sign-normalised** — send them positive; negative works too.
+- `external_id` must be new. The credit note has its own id; reusing the invoice's id just
+  returns that invoice as a duplicate.
+- The response is the ordinary invoice response: `invoice.is_return` is `1`,
+  `invoice.return_against` is the ERPNext name of the original, and quantities and totals are
+  negative.
+- `"is_return": 1` is still accepted. It is only needed to say "credit note" when there is no
+  original invoice to name.
+- A debit note (`is_debit_note: 1`) is **not** turned into a credit note by `return_against`.
 
 Send `return_reason`. ZATCA rejects a credit or debit note that does not state
 why it was issued (`BR-KSA-17`) — the text becomes the UBL `InstructionNote`.
 Absent it, `remarks` is used, then a `"Return of goods"` default, so the filing
 still clears; but the reason on the permanent record is then ours, not yours.
 Verified against the Phase 2 sandbox: without a reason, `HTTP 400 Rejected`.
+
+> **`create_credit_note` is deprecated.** It is kept as an alias so existing integrations keep
+> working, and it differs in one way only: it treats the document as a credit note even when
+> `return_against` and `is_return` are both absent. New integrations should call
+> `create_invoice`.
 
 ### `get_invoice` / `get_status`
 
@@ -415,9 +451,9 @@ parentheses.
 | `cost_center`, `debit_to`, `selling_price_list`, `update_stock` | | Pass-through. |
 | `payment_mode` + `is_pos` | `mode_of_payment` | Supplies the ZATCA **payment means code**. **Requires `is_pos: 1`** — see below. |
 | `payment_amount` | `paid_amount` | Amount on the payments row. Defaults to `0`, so declaring a payment means does not mark the invoice paid. |
-| `is_return` | `is_credit_note` | |
-| `return_against` | `against_invoice`, `original_invoice` | Must be submitted. |
-| `return_reason` | `reason`, `credit_note_reason` | Why the note was issued. **ZATCA requires a reason** (`BR-KSA-17`). Max 140 chars. |
+| `return_against` | `against_invoice`, `original_invoice` | The invoice being corrected. **Sending it makes the document a credit note.** The ERPNext name or the original's `external_id`; must be submitted. |
+| `return_reason` | `reason`, `credit_note_reason`, `custom_return_reason` | Why the note was issued. **ZATCA requires a reason** (`BR-KSA-17`). Max 140 chars. |
+| `is_return` | `is_credit_note` | Optional — implied by `return_against`. Send it only for a credit note that has no original to name. |
 | `is_debit_note` | | |
 | `submit` | `auto_submit`, `do_submit` | Overrides the Auto Submit setting for this request. |
 
@@ -427,7 +463,7 @@ parentheses.
 |---|---|---|
 | `item_code` | `code`, `sku`, `item` | **Required.** |
 | `qty` | `quantity` | Defaults to 1 when absent. An explicit `0` is **rejected**, not silently changed. |
-| `rate` | `price`, `unit_price` | Must not be negative — use `is_return` for credit notes. |
+| `rate` | `price`, `unit_price` | Must not be negative — for a credit note send `return_against` and a positive rate. |
 | `item_name`, `description` | | |
 | `uom` | `unit`, `unit_of_measure` | Conversion factor resolved automatically. |
 | `item_tax_template` | `tax_template`, `item_tax` | **Set this on mixed-rate invoices.** |
@@ -691,6 +727,7 @@ preferred because it returns the QR synchronously.
 
 | Field | Notes |
 |---|---|
+| Document Type | `Sales Invoice` or `Credit Note`. A feed that mixes both can stay `Sales Invoice`: any record carrying `return_against` is imported as a credit note. `Credit Note` treats **every** record as one. |
 | Endpoint URL | Must be `http://` or `https://`. |
 | HTTP Method | `GET` or `POST`. |
 | Auth Type | `None` · `Header Key` · `Bearer Token` · `Basic`. |

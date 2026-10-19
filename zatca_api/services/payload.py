@@ -211,13 +211,26 @@ def coerce(value, value_type: str):
 
 
 def normalise_invoice(raw: dict, is_return: bool = False) -> dict:
-    """Fold an arbitrary inbound payload into the canonical invoice shape."""
+    """Fold an arbitrary inbound payload into the canonical invoice shape.
+
+    ``is_return`` *forces* credit-note treatment: the deprecated ``create_credit_note``
+    endpoint and pull sources typed "Credit Note" pass it. Without it the payload decides.
+    It is a credit note when it says so (``is_return``) or when it names the invoice it
+    corrects (``return_against``) -- the one thing that tells the two documents apart, so a
+    single endpoint can take both. A debit note is excluded from that inference: ERPNext
+    links it to its original through the same ``return_against`` field but keeps
+    ``is_return`` off, and the two flags are mutually exclusive on the form.
+    """
     raw = as_dict(raw)
     index = _build_index(raw)
     index['__indexed__'] = True
 
     def get(canonical, default=None):
         return pick(index, canonical, INVOICE_ALIASES, default)
+
+    return_against = cstr(get('return_against') or '').strip()
+    is_debit_note = cint(get('is_debit_note'))
+    is_return = bool(cint(get('is_return')) or cint(is_return) or (return_against and not is_debit_note))
 
     payload = {
         'external_id': cstr(get('external_id') or '').strip(),
@@ -239,20 +252,17 @@ def normalise_invoice(raw: dict, is_return: bool = False) -> dict:
         'cost_center': cstr(get('cost_center') or '').strip(),
         'po_no': cstr(get('po_no') or '').strip(),
         'remarks': cstr(get('remarks') or '').strip(),
-        'return_against': cstr(get('return_against') or '').strip(),
+        'return_against': return_against,
         'return_reason': cstr(get('return_reason') or '').strip(),
         'debit_to': cstr(get('debit_to') or '').strip(),
         'selling_price_list': cstr(get('selling_price_list') or '').strip(),
         'payment_mode': cstr(get('payment_mode') or '').strip(),
-        'is_return': cint(get('is_return')) or cint(is_return),
-        'is_debit_note': cint(get('is_debit_note')),
+        'is_return': cint(is_return),
+        'is_debit_note': is_debit_note,
         'update_stock': cint(get('update_stock')),
         'is_pos': cint(get('is_pos')),
         'payment_amount': flt(get('payment_amount')),
-        'items': [
-            _normalise_item(row, is_return=bool(cint(get('is_return')) or cint(is_return)))
-            for row in as_list(get('items'))
-        ],
+        'items': [_normalise_item(row, is_return=is_return) for row in as_list(get('items'))],
         'taxes': [_normalise_tax(row) for row in as_list(get('taxes'))],
         'address': _normalise_address(as_dict(get('address'))),
         'raw': raw,
@@ -375,9 +385,10 @@ def validate_invoice(payload: dict) -> None:
             )
         if flt(item.get('rate')) < 0:
             raise PayloadError(
-                _('Item row {0} ({1}): rate must not be negative. Use is_return for credit notes.').format(
-                    idx, item['item_code']
-                ),
+                _(
+                    'Item row {0} ({1}): rate must not be negative. For a credit note send '
+                    'return_against (or is_return) and a positive rate.'
+                ).format(idx, item['item_code']),
                 {'row': idx, 'field': 'rate'},
             )
 
@@ -404,8 +415,13 @@ def validate_invoice(payload: dict) -> None:
         against = payload['return_against']
         docstatus = frappe.db.get_value('Sales Invoice', against, 'docstatus')
         if docstatus is None:
+            # By now invoice.resolve_return_against has already tried the external id, so
+            # saying only "no invoice with this name" would hide that both were checked.
             raise PayloadError(
-                _('return_against invoice {0} does not exist.').format(against),
+                _(
+                    'return_against invoice {0} does not exist: no Sales Invoice has that name '
+                    'or that external_id.'
+                ).format(against),
                 {'field': 'return_against'},
             )
         if cint(docstatus) != 1:
