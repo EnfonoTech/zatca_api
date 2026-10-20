@@ -61,6 +61,7 @@ curl -H "Authorization: token <api_key>:<api_secret>" \
 | GET | `zatca_api.api.v1.get_invoice` | One invoice + its ZATCA block |
 | GET | `zatca_api.api.v1.get_status` | Cheap clearance-status poll |
 | GET | `zatca_api.api.v1.list_invoices` | Paginated list |
+| GET | `zatca_api.api.v1.list_import_errors` | Why a record did not import, and pull-source health |
 | GET | `zatca_api.api.v1.ping` | Health and capability probe |
 | POST | `zatca_api.api.v1.pull_now` | Trigger a configured pull source |
 

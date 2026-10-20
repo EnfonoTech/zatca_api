@@ -235,6 +235,7 @@ Base path: `https://<site>/api/method/zatca_api.api.v1.`
 | GET | `get_invoice` | One invoice + ZATCA block |
 | GET | `get_status` | Cheap clearance-status poll |
 | GET | `list_invoices` | Paginated list |
+| GET | `list_import_errors` | Why a record did not import, and whether each pull source is working |
 | GET | `ping` | Health / capability probe |
 | POST | `pull_now` | Trigger a configured pull source |
 
@@ -355,8 +356,8 @@ There is no separate endpoint. A credit note is **the invoice body plus two fiel
   tried first. It must reference a **submitted** invoice: ZATCA requires a credit note to
   identify its original. You do not have to store our invoice names.
 - Quantities are **sign-normalised** — send them positive; negative works too.
-- `external_id` must be new. The credit note has its own id; reusing the invoice's id just
-  returns that invoice as a duplicate.
+- `external_id` must be new. The credit note has its own id; sending one under the invoice's id
+  is refused with `409 duplicate`, naming the invoice that owns it.
 - The response is the ordinary invoice response: `invoice.is_return` is `1`,
   `invoice.return_against` is the ERPNext name of the original, and quantities and totals are
   negative.
@@ -386,6 +387,11 @@ GET .get_status?external_id=INV-2026-0001
 `get_status` returns only `docstatus`, `status` and a trimmed `zatca` block —
 use it for polling.
 
+When the external id is **not found** and the last attempt to import it failed, the
+response says why: the reason is in `errors[0].message` and, structured, in
+`errors[0].details.last_import_error`. A record that was never created has usually been
+refused, not lost — see [`list_import_errors`](#list_import_errors--why-a-record-did-not-import).
+
 ### `list_invoices`
 
 ```
@@ -403,6 +409,109 @@ GET .list_invoices?integration_status=Rejected&limit=50
 
 Results respect the calling user's permissions, including User Permissions that
 restrict them to one company.
+
+### `list_import_errors` — why a record did not import
+
+A record that never appears was refused, not lost. This endpoint says why — the same
+message the request log holds — so nobody has to open the desk to find out. In pull
+mode it is the only place a caller ever sees the reason, because they never receive a
+response from us.
+
+```
+GET .list_import_errors
+GET .list_import_errors?external_id=E26
+GET .list_import_errors?source=Prompt%20Dev&hours=24&limit=50
+```
+
+| Param | Default | Notes |
+|---|---|---|
+| `external_id` | — | One record. |
+| `source` | — | One pull source, by its name under *Pull Sources*. |
+| `hours` | 72 | How far back to look. Capped at 720. |
+| `limit` / `start` | 50 / 0 | Paging. `limit` is capped at **200**. |
+
+Response `data`:
+
+| Key | Meaning |
+|---|---|
+| `errors[]` | One entry per external id whose **newest** attempt failed, most recent first. An id that failed and has since gone through is **not** listed — this is what still needs fixing, not a history. |
+| `errors[].message` | The reason, in words. |
+| `errors[].channel` | `pull` (we fetched it) or `api` (it was sent to `create_invoice`). |
+| `errors[].attempts`, `first_seen`, `last_seen` | How many times in a row it has failed, and since when. |
+| `errors[].existing_invoice` | The invoice that already owns this external id, when one does. |
+| `sources[]` | One entry per configured pull source: `status` is `ok`, `failing` or `idle`. When `failing`, `last_error` carries the reason — for example a refused login, with what the server said — and `failing_since`. |
+| `count`, `total`, `has_more` | Paging. |
+
+A pull source whose login is blocked, and three records that cannot import:
+
+```json
+{
+  "window_hours": 72,
+  "count": 3,
+  "total": 3,
+  "start": 0,
+  "limit": 50,
+  "has_more": false,
+  "errors": [
+    {
+      "external_id": "C001",
+      "message": "external_id C001 already belongs to ACC-SINV-2026-00055, which is a Sales Invoice, but this record is a credit note. An external id identifies one document for good, so send this record under a new external_id.",
+      "channel": "pull",
+      "source": "Prompt Dev",
+      "attempts": 1,
+      "first_seen": "2026-10-20 08:58:30",
+      "last_seen": "2026-10-20 08:58:30",
+      "existing_invoice": "ACC-SINV-2026-00055",
+      "existing_document_type": "sales_invoice"
+    },
+    {
+      "external_id": "E24",
+      "message": "Exchange Rate is mandatory. Maybe Currency Exchange record is not created for KWD to SAR.",
+      "channel": "pull",
+      "source": "Prompt Dev",
+      "attempts": 1,
+      "first_seen": "2026-10-20 08:28:30",
+      "last_seen": "2026-10-20 08:28:30",
+      "existing_invoice": null,
+      "existing_document_type": null
+    },
+    {
+      "external_id": "E26",
+      "message": "A complete buyer address is mandatory for a B2B customer, because ZATCA rejects a standard invoice without one. Problems: Buyer address has no building number (custom_building_number).",
+      "channel": "pull",
+      "source": "Prompt Dev",
+      "attempts": 3,
+      "first_seen": "2026-10-20 07:43:30",
+      "last_seen": "2026-10-20 08:13:30",
+      "existing_invoice": null,
+      "existing_document_type": null
+    }
+  ],
+  "sources": [
+    {
+      "source": "Prompt Dev",
+      "enabled": true,
+      "status": "failing",
+      "last_success_at": "2026-10-20 05:59:10",
+      "last_error": {
+        "message": "Login failed for source Prompt Dev at https://prompt.example.com/api/login: 403 Client Error: Forbidden. The server said: Account has been blocked. Please contact your administrator For support.",
+        "at": "2026-10-20 09:04:10",
+        "failing_since": "2026-10-20 08:49:10",
+        "attempts": 2
+      }
+    }
+  ]
+}
+```
+
+A source counts as *failing* when its newest source-level failure — a refused login, an
+unreachable host, a crash; an attempt that never got as far as one record — is newer
+than its newest success. Failures of individual records do not make a reachable source
+*failing*; they are listed per external id instead.
+
+Visibility: pull attempts are visible to every caller; push attempts (`create_invoice`)
+only to the user who made them, so one integration cannot read another's rejected
+invoices. The caller needs the same *read* permission on Sales Invoice as `get_invoice`.
 
 ### `resubmit_to_zatca`
 
@@ -570,7 +679,7 @@ taxes table.
 | 401 | `unauthorized` | No authenticated session. |
 | 403 | `forbidden` | Missing DocType permission, bad shared secret, IP not allowed — or a wrong HTTP verb. |
 | 404 | `not_found` | Unknown invoice / external id. |
-| 409 | `duplicate` | External id conflict. |
+| 409 | `duplicate` | External id conflict: the id already belongs to a **different kind of document** — an invoice cannot take a credit note's id, or the reverse. `details.invoice` names the owner. Send the record under a new id. |
 | 409 | `immutable_document` | External id maps to a **cancelled** invoice. Send a new id. |
 | 424 | `zatca_unavailable` | `ksa_compliance` not installed. |
 | 502 | `upstream_error` | Pull-mode source failed. |
@@ -615,6 +724,11 @@ Every invoice stores your `external_id` in the indexed custom field
 
 The lookup takes a `FOR UPDATE` lock on the indexed column, so two concurrent
 requests carrying the same id serialise instead of racing to insert two invoices.
+
+An external id also fixes the **kind** of document. Sending a credit note under the id of an
+existing invoice (or an invoice under a credit note's id) is refused with `409 duplicate`,
+naming the document that owns the id — it is never answered with `duplicate: true`, which
+would read as success with nothing created.
 
 **Retrying is always safe.** A network timeout where the server actually committed
 resolves cleanly: retry and you get the existing invoice with its QR.
@@ -755,6 +869,14 @@ Each invoice is committed in **its own transaction**, so a failure on invoice 40
 leaves the first 39 durably imported and rolls back only the failed one. Dedup is
 by external id, so re-polling the same feed does not duplicate anything.
 
+**When something fails, the reason is recorded and readable.** A record that cannot be
+imported is logged with its message and the pull moves on to the next. A source that cannot
+be reached at all — a refused login, a dead host — is logged against the source, and a
+refused login includes what the upstream server said (for example *Account has been
+blocked*). Both are returned by
+[`list_import_errors`](#list_import_errors--why-a-record-did-not-import), so the people who
+own the feed can see why without access to the desk.
+
 ---
 
 ## 12. Custom field mapping
@@ -797,7 +919,8 @@ Project.
 | Duplicate invoices appearing | You are not sending a stable `external_id`, or sending a different one for the same source document. |
 | `warnings` about the buyer address | Missing ZATCA-required address parts. Send `address_parts`, or enable free-text parsing. |
 | Response too large | Turn off *Include QR PNG* and/or *Include Signed XML*; drop `include_qr` from `list_invoices`. |
-| Where do I see what happened? | **ZATCA API Request Log** (endpoint, status, HTTP code, duration, payloads, ZATCA phase/UUID/status) and **Error Log** for tracebacks. Match on `request_id`. |
+| A record never appeared | `GET list_import_errors?external_id=<id>` — or call `get_status` on the id, whose *not found* now carries the reason. If `sources[].status` is `failing`, the pull itself is down and `last_error` says why (for example a login the upstream system has blocked). |
+| Where do I see what happened? | **ZATCA API Request Log** (endpoint, status, HTTP code, duration, payloads, ZATCA phase/UUID/status) and **Error Log** for tracebacks. Match on `request_id`. The reasons for failed imports are also served by `list_import_errors`. |
 
 ---
 

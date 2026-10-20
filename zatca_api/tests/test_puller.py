@@ -12,8 +12,9 @@ from unittest.mock import patch
 import frappe
 from frappe.utils import add_days, cint, getdate, today
 
-from zatca_api.services import puller
+from zatca_api.services import failures, puller
 from zatca_api.tests.test_api_v1 import ZATCAAPITestCase
+from zatca_api.zatca_api.doctype.zatca_api_source.zatca_api_source import _redact, _vendor_reply
 
 
 class FakeResponse:
@@ -432,3 +433,254 @@ class TestSourceValidation(ZATCAAPITestCase):
         )
         self.assertEqual(row.source_name, 'Validated')
         self.assertEqual(row.next_cursor_key, 'meta.next')
+
+
+class _StubSettings:
+    """Just enough of ZATCA API Settings for the puller, so a test needs no saved Single."""
+
+    log_requests = 1
+    enabled = 1
+    pull_enabled = 1
+
+    def __init__(self, row):
+        self.sources = [row]
+        self._row = row
+
+    def get(self, key):
+        return self.sources if key == 'sources' else None
+
+    def get_source(self, name):
+        return self._row if name == self._row.source_name else None
+
+
+_FEED_ITEM = {'external_id': 'MSG-1', 'customer': 'C', 'items': [{'item_code': 'I', 'qty': 1, 'rate': 1}]}
+
+
+class TestImportSourceMessages(ZATCAAPITestCase):
+    """A record the pull cannot import must say why - in the result and in the request log."""
+
+    def _import(self, build_effect, name='MSG Src'):
+        row = _source(source_name=name)
+        with (
+            patch.object(puller, 'get_settings', return_value=_StubSettings(row)),
+            patch.object(puller, 'fetch_source', return_value=([dict(_FEED_ITEM)], None, False)),
+            patch.object(puller.invoice_service, 'build_invoice', side_effect=build_effect),
+        ):
+            return puller.import_source(name)
+
+    def _log_rows(self, name):
+        return frappe.get_all(
+            'ZATCA API Request Log',
+            filters={'endpoint': f'pull:{name}'},
+            fields=['status', 'external_id', 'error'],
+        )
+
+    def test_erpnext_validation_errors_keep_their_message(self):
+        """The KWD case: ERPNext refuses, and the feed's owner needs to read why."""
+        reason = 'Exchange Rate is mandatory. Maybe Currency Exchange record is not created for KWD to SAR.'
+        results = self._import(frappe.ValidationError(reason))
+
+        self.assertEqual(results['failed'], 1)
+        detail = results['details'][0]
+        self.assertIn('Exchange Rate is mandatory', detail['error'])
+        self.assertEqual(detail['code'], 'validation_error')
+
+        row = self._log_rows('MSG Src')[0]
+        self.assertEqual(row.status, 'Failed')
+        self.assertEqual(row.external_id, 'MSG-1')
+        self.assertIn('Exchange Rate is mandatory', row.error)
+        self.assertNotIn('Traceback', row.error)
+
+    def test_an_unexpected_error_stays_generic_in_the_result(self):
+        """Its traceback belongs in the Error Log, not in something a caller reads."""
+        results = self._import(RuntimeError('db exploded'), name='MSG Boom')
+
+        self.assertEqual(results['failed'], 1)
+        self.assertEqual(results['details'][0]['error'], 'Unhandled error, see Error Log')
+
+    def test_a_payload_error_is_still_reported_by_its_message(self):
+        from zatca_api.services.payload import PayloadError
+
+        results = self._import(PayloadError('Buyer address has no building number.'), name='MSG Payload')
+
+        self.assertEqual(results['details'][0]['error'], 'Buyer address has no building number.')
+        self.assertEqual(self._log_rows('MSG Payload')[0].error, 'Buyer address has no building number.')
+
+    def test_a_refused_login_is_recorded_for_the_source_with_its_reason(self):
+        """The outage that read 'Crashed, see Error Log' and was visible nowhere an integrator looks."""
+        row = _source(source_name='MSG Down')
+        stub = _StubSettings(row)
+        reason = (
+            'Login failed for source MSG Down at https://up.example.com/login: 403 Client Error. '
+            'The server said: Account has been blocked.'
+        )
+        with (
+            patch.object(puller, 'get_settings', return_value=stub),
+            patch.object(puller, 'import_source', side_effect=frappe.ValidationError(reason)),
+        ):
+            summary = puller.pull_all_sources()
+
+        self.assertIn('Account has been blocked', summary['sources'][0]['error'])
+
+        rows = self._log_rows('MSG Down')
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].status, 'Failed')
+        self.assertFalse(rows[0].external_id, 'a source-level failure has no external id')
+        self.assertIn('Account has been blocked', rows[0].error)
+
+        health = failures.source_health(stub)[0]
+        self.assertEqual(health['status'], 'failing')
+        self.assertIn('Account has been blocked', health['last_error']['message'])
+
+    def test_a_blocked_login_travels_the_whole_chain_to_the_source_health(self):
+        """The real incident end to end: nothing between the cron and the login is patched out."""
+        row = _source(
+            source_name='MSG Chain',
+            auth_type='Login (Token)',
+            token_url='https://up.example.com/login',
+            auth_username='api-user',
+            token_request_body='',
+            token_response_path='',
+        )
+        row.auth_secret = 'S3cretPassw0rd'
+        stub = _StubSettings(row)
+        body = (
+            '{"isSuccess":false,"data":null,'
+            '"error":"Account has been blocked. Please contact your administrator For support."}'
+        )
+
+        with (
+            patch.object(puller, 'get_settings', return_value=stub),
+            patch('requests.post', return_value=_LoginResponse(403, body)),
+        ):
+            summary = puller.pull_all_sources()
+
+        self.assertIn('The server said: Account has been blocked.', summary['sources'][0]['error'])
+        self.assertNotIn('S3cretPassw0rd', summary['sources'][0]['error'])
+
+        health = failures.source_health(stub)[0]
+        self.assertEqual(health['status'], 'failing')
+        self.assertIn('Account has been blocked', health['last_error']['message'])
+        self.assertNotIn('S3cretPassw0rd', health['last_error']['message'])
+
+    def test_an_unexpected_crash_of_a_source_is_logged_without_leaking_detail(self):
+        row = _source(source_name='MSG Crash')
+        with (
+            patch.object(puller, 'get_settings', return_value=_StubSettings(row)),
+            patch.object(puller, 'import_source', side_effect=RuntimeError('secret internals')),
+        ):
+            summary = puller.pull_all_sources()
+
+        self.assertEqual(summary['sources'][0]['error'], 'Crashed, see Error Log')
+        error = self._log_rows('MSG Crash')[0].error
+        self.assertIn('see the Error Log', error)
+        self.assertNotIn('secret internals', error)
+
+
+class _LoginResponse:
+    """A reply to the login POST that raises on an error status, as ``requests`` does."""
+
+    def __init__(self, status_code, text):
+        self.status_code = status_code
+        self.text = text
+
+    def raise_for_status(self):
+        import requests
+
+        if self.status_code >= 400:
+            raise requests.exceptions.HTTPError(
+                f'{self.status_code} Client Error: Forbidden for url: https://up.example.com/login'
+            )
+
+    def json(self):
+        return json.loads(self.text)
+
+
+class TestLoginReply(ZATCAAPITestCase):
+    """'403 Forbidden' says the login failed. What the server said says why."""
+
+    PASSWORD = 'S3cretPassw0rd'
+
+    def _row(self):
+        row = _source(
+            auth_type='Login (Token)',
+            token_url='https://up.example.com/login',
+            auth_username='api-user',
+            token_request_body='',
+            token_response_path='',
+        )
+        row.auth_secret = self.PASSWORD
+        return row
+
+    def _login_error(self, response=None, side_effect=None):
+        with patch('requests.post', return_value=response, side_effect=side_effect):
+            with self.assertRaises(frappe.ValidationError) as caught:
+                self._row()._fetch_login_token()
+        from zatca_api.services.envelope import clean_message
+
+        return clean_message(caught.exception)
+
+    def test_the_servers_reason_is_in_the_error(self):
+        body = '{"isSuccess":false,"data":null,"error":"Account has been blocked. Please contact your administrator."}'
+        message = self._login_error(_LoginResponse(403, body))
+
+        self.assertIn('403', message)
+        self.assertIn('The server said: Account has been blocked.', message)
+        # said once: requests' own text repeats the url, and the sentence has already named it
+        self.assertEqual(message.count('https://up.example.com/login'), 1)
+
+    def test_the_password_and_username_are_never_echoed(self):
+        body = '{"error":"Invalid password S3cretPassw0rd for api-user"}'
+        message = self._login_error(_LoginResponse(401, body))
+
+        self.assertNotIn(self.PASSWORD, message)
+        self.assertNotIn('api-user', message)
+        self.assertIn('[redacted]', message)
+
+    def test_an_html_error_page_is_reduced_to_its_text(self):
+        html = '<html><body><h1>403 - Forbidden: Access is denied.</h1></body></html>'
+        message = self._login_error(_LoginResponse(403, html))
+
+        self.assertIn('Access is denied', message)
+        self.assertNotIn('<h1>', message)
+
+    def test_no_body_means_no_clause(self):
+        message = self._login_error(_LoginResponse(403, ''))
+        self.assertNotIn('The server said', message)
+
+    def test_a_connection_failure_has_no_reply_to_quote(self):
+        import requests
+
+        message = self._login_error(side_effect=requests.exceptions.ConnectionError('refused'))
+        self.assertIn('Login failed for source Test Source', message)
+        self.assertNotIn('The server said', message)
+
+
+class TestVendorReplyRedaction(ZATCAAPITestCase):
+    def test_reads_the_usual_keys_whatever_their_case(self):
+        for body in ('{"Message": "Nope"}', '{"detail": "Nope"}', '{"title": "Nope"}', '{"ERROR": "Nope"}'):
+            with self.subTest(body=body):
+                self.assertEqual(_vendor_reply(_LoginResponse(403, body)), 'Nope')
+
+    def test_a_structured_error_is_kept_as_json_text(self):
+        reply = _vendor_reply(_LoginResponse(400, '{"error": {"code": 17, "text": "locked"}}'))
+        self.assertIn('locked', reply)
+
+    def test_tokens_and_emails_are_redacted(self):
+        token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9abcdefghijklmnop'
+        reply = _vendor_reply(_LoginResponse(400, f'{{"error": "bad token {token} for user@example.com"}}'))
+
+        self.assertNotIn(token, reply)
+        self.assertNotIn('user@example.com', reply)
+        self.assertIn('[email]', reply)
+
+    def test_the_reply_is_capped(self):
+        long_reply = _LoginResponse(400, '{"error": "' + 'x ' * 400 + '"}')
+        self.assertLessEqual(len(_vendor_reply(long_reply)), 300)
+
+    def test_no_response_is_an_empty_reason(self):
+        self.assertEqual(_vendor_reply(None), '')
+
+    def test_redact_ignores_a_secret_too_short_to_be_one(self):
+        """A 2-character 'password' would otherwise blank out half of every message."""
+        self.assertEqual(_redact('ab is fine', ('ab',)), 'ab is fine')

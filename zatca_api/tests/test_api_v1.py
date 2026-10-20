@@ -10,6 +10,8 @@ idempotency, submitted-document immutability, mixed-rate tax correctness, and
 never exposing invoice data without authentication.
 """
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, cint, flt, today
@@ -659,6 +661,110 @@ class TestCreditNote(ZATCAAPITestCase):
         self.assertEqual(invoice['is_return'], 0)
         self.assertFalse(invoice['return_against'])
         self.assertEqual(invoice['items'][0]['qty'], 2.0)
+
+
+def _note_lines():
+    return [{'item_code': TEST_ITEM, 'qty': 1, 'rate': 100}]
+
+
+class TestKindClash(ZATCAAPITestCase):
+    """An external id names one document for good - including what kind of document it is.
+
+    Before this, a credit note sent under the id of an existing invoice came back as an ordinary
+    ``duplicate``: success-shaped, with no credit note behind it.
+    """
+
+    def _log_requests_on(self):
+        """Switch request logging on for real: committed, because a refused request rolls back.
+
+        A refusal ends in ``frappe.db.rollback()``, which would silently undo a switch that was
+        only saved inside the test's own transaction and leave nothing to read back.
+        """
+        _configure_settings(log_requests=1)
+        frappe.db.commit()
+        self.addCleanup(self._log_requests_off)
+
+    def _log_requests_off(self):
+        _configure_settings(log_requests=0)
+        frappe.db.commit()
+
+    def _submitted_original(self, external_id):
+        name = v1.create_invoice(**_payload(external_id))['data']['invoice']['invoice']
+        invoice_service.submit_invoice(name)
+        return name
+
+    def _clash(self, external_id):
+        """A submitted original, an invoice already holding ``external_id``, then a credit note on that id."""
+        original = self._submitted_original(f'{external_id}-ORIG')
+        taken = v1.create_invoice(**_payload(external_id))['data']['invoice']['invoice']
+        response = v1.create_invoice(**_payload(external_id, return_against=original, items=_note_lines()))
+        return taken, response
+
+    def test_a_credit_note_cannot_take_the_id_of_an_existing_invoice(self):
+        taken, response = self._clash('ZAPI-KC-TAKEN')
+
+        self.assertFalse(response['success'])
+        error = response['errors'][0]
+        self.assertEqual(error['code'], 'duplicate')
+        self.assertIn(f'already belongs to {taken}', error['message'])
+        self.assertIn('credit note', error['message'])
+        self.assertEqual(error['details']['invoice'], taken)
+        self.assertEqual(error['details']['existing_document_type'], 'sales_invoice')
+        self.assertEqual(error['details']['document_type'], 'credit_note')
+        self.assertEqual(frappe.local.response.get('http_status_code'), 409)
+
+    def test_an_invoice_cannot_take_the_id_of_an_existing_credit_note(self):
+        original = self._submitted_original('ZAPI-KC-ORIG2')
+        v1.create_invoice(**_payload('ZAPI-KC-NOTE', return_against=original, items=_note_lines()))
+
+        response = v1.create_invoice(**_payload('ZAPI-KC-NOTE'))
+
+        self.assertFalse(response['success'])
+        error = response['errors'][0]
+        self.assertEqual(error['code'], 'duplicate')
+        self.assertEqual(error['details']['existing_document_type'], 'credit_note')
+        self.assertEqual(error['details']['document_type'], 'sales_invoice')
+
+    def test_the_same_kind_of_document_is_still_an_ordinary_duplicate(self):
+        first = v1.create_invoice(**_payload('ZAPI-KC-SAME'))
+        invoice_service.submit_invoice(first['data']['invoice']['invoice'])
+
+        again = v1.create_invoice(**_payload('ZAPI-KC-SAME'))
+
+        self.assertTrue(again['success'], msg=again.get('errors'))
+        self.assertTrue(again['data']['duplicate'])
+
+    def test_the_dry_run_reports_the_clash(self):
+        original = self._submitted_original('ZAPI-KC-DRY-ORIG')
+        v1.create_invoice(**_payload('ZAPI-KC-DRY'))
+
+        payload = _payload('ZAPI-KC-DRY', return_against=original, items=_note_lines())
+        report = v1.validate_payload(**payload)['data']
+
+        self.assertFalse(report['valid'])
+        self.assertIn('already belongs to', report['errors'][0]['message'])
+
+    def test_the_refusal_can_be_read_back_through_list_import_errors(self):
+        self._log_requests_on()
+        taken, _response = self._clash('ZAPI-KC-LOG')
+
+        entry = v1.list_import_errors(external_id='ZAPI-KC-LOG')['data']['errors'][0]
+
+        self.assertIn('already belongs to', entry['message'])
+        self.assertIn(taken, entry['message'])
+        self.assertEqual(entry['channel'], 'api')
+
+    def test_an_erpnext_refusal_is_logged_as_its_message_and_readable_back(self):
+        """The KWD case on the push path: the caller gets the real reason, not a traceback line."""
+        self._log_requests_on()
+        reason = 'Exchange Rate is mandatory. Maybe Currency Exchange record is not created for KWD to SAR.'
+
+        with patch.object(invoice_service, 'build_invoice', side_effect=frappe.ValidationError(reason)):
+            response = v1.create_invoice(**_payload('ZAPI-KC-FX'))
+
+        self.assertFalse(response['success'])
+        entry = v1.list_import_errors(external_id='ZAPI-KC-FX')['data']['errors'][0]
+        self.assertEqual(entry['message'], reason)
 
 
 class TestValidationErrors(ZATCAAPITestCase):

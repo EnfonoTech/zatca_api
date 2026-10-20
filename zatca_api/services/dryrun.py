@@ -28,7 +28,7 @@ from frappe.utils import cint, cstr, flt
 
 from zatca_api.services import invoice as invoice_service
 from zatca_api.services import zatca
-from zatca_api.services.envelope import ERR_VALIDATION, item_error
+from zatca_api.services.envelope import ERR_VALIDATION, clean_message, item_error
 from zatca_api.services.payload import PayloadError, normalise_invoice
 
 SAVEPOINT = 'zatca_api_dry_run'
@@ -206,14 +206,4 @@ def _zatca_readiness(report: dict, payload: dict) -> dict:
 
 
 def _clean(exc) -> str:
-    from frappe.utils import strip_html
-
-    text = strip_html(cstr(exc)).strip()
-    seen = set()
-    lines = []
-    for line in text.splitlines():
-        line = line.strip()
-        if line and line not in seen:
-            seen.add(line)
-            lines.append(line)
-    return ' '.join(lines)[:2000] or _('Validation failed.')
+    return clean_message(exc)

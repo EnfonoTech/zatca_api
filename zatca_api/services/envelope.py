@@ -13,7 +13,8 @@ and failure means an integrator writes one parser, not two.
 """
 
 import frappe
-from frappe.utils import now
+from frappe import _
+from frappe.utils import cstr, now, strip_html
 
 # Machine-readable error codes. Callers should branch on these, never on message
 # text, which is translated and may change.
@@ -92,3 +93,34 @@ def error_response(
 def item_error(code: str, message: str, details: dict | None = None) -> dict:
     """An error entry for one item of a batch, without touching the HTTP status."""
     return {'code': code, 'message': message, 'details': details or {}}
+
+
+def clean_message(exc) -> str:
+    """Flatten a frappe validation error into a single readable line.
+
+    ``frappe.throw(msg)`` passes the message to the exception, so ``str(exc)`` is
+    the most reliable source. ``message_log`` is only consulted when the exception
+    itself carries nothing, and only its last entry - earlier entries belong to
+    unrelated msgprints from the same request.
+
+    Shared by the REST endpoints, the dry run and the puller, so one failure reads
+    the same wherever the caller meets it.
+    """
+    text = cstr(exc).strip()
+    if not text and frappe.message_log:
+        last = frappe.message_log[-1]
+        text = cstr(last.get('message') if isinstance(last, dict) else last)
+
+    text = strip_html(text).strip()
+
+    # Validation code that joins a message log can repeat the same line. Collapse
+    # duplicates while preserving order so the response reads as one clear error.
+    seen = set()
+    lines = []
+    for line in text.splitlines():
+        line = line.strip()
+        if line and line not in seen:
+            seen.add(line)
+            lines.append(line)
+
+    return ' '.join(lines)[:2000] or _('Validation failed.')

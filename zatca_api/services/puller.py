@@ -28,6 +28,7 @@ from frappe import _
 from frappe.utils import cint, cstr, now
 
 from zatca_api.services import invoice as invoice_service
+from zatca_api.services.envelope import ERR_VALIDATION, clean_message
 from zatca_api.services.payload import PayloadError, as_dict, normalise_invoice
 from zatca_api.zatca_api.doctype.zatca_api_settings.zatca_api_settings import get_settings
 
@@ -225,6 +226,16 @@ def import_source(source_name: str) -> dict:
             results['details'].append({'external_id': external_id, 'error': exc.message, 'code': exc.code})
             _log(source_name, 'Failed', external_id=external_id, error=exc.message)
 
+        except frappe.ValidationError as exc:
+            # ERPNext's or ksa_compliance's own validation - a missing exchange rate, a rule on
+            # the buyer. It is an expected, explainable failure, so the message is kept rather
+            # than flattened to "Unhandled error": the people fixing the feed need the reason.
+            frappe.db.rollback()
+            message = clean_message(exc)
+            results['failed'] += 1
+            results['details'].append({'external_id': external_id, 'error': message, 'code': ERR_VALIDATION})
+            _log(source_name, 'Failed', external_id=external_id, error=message)
+
         except Exception:
             # Roll back first: continuing to the next item on a dirty transaction
             # would attribute this item's partial writes to the next invoice.
@@ -299,12 +310,19 @@ def pull_all_sources() -> dict:
             continue
         try:
             summary['sources'].append(import_source(source.source_name))
-        except Exception:
+        except Exception as exc:
             frappe.db.rollback()
             frappe.log_error(
                 title=f'ZATCA API pull crashed: {source.source_name}'[:140],
                 message=frappe.get_traceback(),
             )
-            summary['sources'].append({'source': source.source_name, 'error': 'Crashed, see Error Log'})
+            # A refused login or a bad configuration arrives as a validation error whose message
+            # is written for a human (and carries no secret), so it is shown as it is. Anything
+            # else stays generic: its traceback is in the Error Log, not in a response.
+            message = clean_message(exc) if isinstance(exc, frappe.ValidationError) else None
+            _log(source.source_name, 'Failed', error=message or 'The pull crashed, see the Error Log.')
+            summary['sources'].append(
+                {'source': source.source_name, 'error': message or 'Crashed, see Error Log'}
+            )
 
     return summary

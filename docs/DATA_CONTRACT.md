@@ -224,8 +224,8 @@ endpoint**. There is no separate credit-note call and no flag to set.
   still succeeds — but the reason on the permanent record will not be yours.
 - Send `qty` as the quantity being returned. Positive or negative both work — we
   normalise the sign.
-- A credit note needs its **own** `external_id`. Reusing the invoice's id returns that invoice
-  as a duplicate; it does not create a credit note.
+- A credit note needs its **own** `external_id`. Sending one under the invoice's id is refused
+  (`409 duplicate`, naming the invoice that owns the id); ids are never recycled.
 - `is_return: 1` is still accepted, but only needed for a credit note that has no original
   invoice to name. Sending `return_against` already implies it.
 - Debit notes (`is_debit_note: 1`) are different: `return_against` does not turn one into a
@@ -336,6 +336,13 @@ Tell us:
 
 An empty `payloads` array is a valid response and means nothing new.
 
+**When a record is refused, or the feed cannot be read, you can see why.** We never send you a
+response in pull mode, so we publish the reasons instead:
+`GET /api/method/zatca_api.api.v1.list_import_errors` returns one entry per `external_id` that
+still fails to import — with the message, how many times, and since when — and, per feed, whether
+we can reach you at all. If we cannot log in to your system, the entry carries what your server
+answered (for example *Account has been blocked*). Ask us for read access to it.
+
 ---
 
 ## 10. Things that will bite
@@ -343,6 +350,7 @@ An empty `payloads` array is a valid response and means nothing new.
 | Mistake | Consequence |
 |---|---|
 | `external_id` not stable across retries | Duplicate invoices |
+| An `external_id` reused for a different kind of document (a credit note under an invoice's id, or the reverse) | **Refused** with `409 duplicate`, naming the document that owns the id. Ids are never recycled — send the record under a new one |
 | B2B buyer sent without `tax_id` | Filed as *simplified* — compliance defect, no error shown |
 | B2B buyer with an incomplete address | **Request rejected.** Send all five address fields |
 | `building_number` as `521` not `"0521"` | ZATCA rejects the invoice |
@@ -368,12 +376,16 @@ On success, for every invoice:
 
 | Field | Use |
 |---|---|
-| `data.invoice.invoice` | The ERPNext invoice name. **Store it** — needed for `return_against`. |
+| `data.invoice.invoice` | The ERPNext invoice name. Worth keeping for support; a credit note's `return_against` accepts it **or** the original's `external_id`. |
 | `data.invoice.grand_total` | Reconcile against your figure. |
 | `data.zatca.qr_png_base64` | The ZATCA QR image. Put it on your printed/PDF invoice. |
 | `data.zatca.uuid`, `data.zatca.invoice_hash` | ZATCA identifiers, for your records. |
 | `data.zatca.integration_status` | ZATCA's verdict. Arrives asynchronously — poll `get_status`. |
 | `warnings` | Non-fatal, but log them. Usually incomplete buyer address. |
+
+**If a record does not arrive**, it was refused for a reason, and you can read it:
+`GET list_import_errors?external_id=<your id>`, or `get_status` on the same id — its *not found*
+carries the last failure. A record that failed and later went through is not listed.
 
 Full API reference: [`USER_GUIDE.md`](USER_GUIDE.md).
 

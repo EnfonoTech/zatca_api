@@ -122,6 +122,7 @@
   <a href="#zatca">The zatca block</a>
   <a href="#endpoints">Endpoints</a>
   <a href="#creditnotes">Credit notes</a>
+  <a href="#importerrors">Why a record did not import</a>
   <a href="#payload">Invoice payload</a>
   <a href="#tax">Taxes</a>
   <a href="#errors">Error codes</a>
@@ -458,6 +459,8 @@ company has no ZATCA settings, or <code>ksa_compliance</code> is not installed.
     <td>Cheap clearance-status poll</td></tr>
 <tr><td><span class="badge b-get">GET</span></td><td><code>list_invoices</code></td>
     <td>Paginated list</td></tr>
+<tr><td><span class="badge b-get">GET</span></td><td><code>list_import_errors</code></td>
+    <td>Why a record did not import, and whether each pull source is working</td></tr>
 <tr><td><span class="badge b-get">GET</span></td><td><code>ping</code></td>
     <td>Health and capability probe</td></tr>
 <tr><td><span class="badge b-post">POST</span></td><td><code>pull_now</code></td>
@@ -493,8 +496,8 @@ fields</strong>:</p>
     <strong>or the <code>external_id</code> you sent for it</strong> &mdash; the name is tried
     first. It must reference a <strong>submitted</strong> invoice.</li>
 <li>Quantities are sign-normalised &mdash; send them positive; negative works too.</li>
-<li><code>external_id</code> must be new. Reusing the invoice's id returns that invoice as a
-    duplicate.</li>
+<li><code>external_id</code> must be new. A credit note sent under the invoice's id is refused
+    with <code>409 duplicate</code>, naming the invoice that owns it.</li>
 <li>The response is the ordinary invoice response: <code>invoice.is_return</code> is
     <code>1</code>, and quantities and totals are negative.</li>
 <li><code>"is_return": 1</code> is still accepted &mdash; needed only for a credit note with no
@@ -512,6 +515,10 @@ integrations should call <code>create_invoice</code>.</p>
 <p><code>get_invoice</code>, <code>get_status</code>, <code>submit_invoice</code> and
 <code>resubmit_to_zatca</code> accept either <code>external_id</code> (your
 reference) or <code>invoice</code> (the ERPNext name).</p>
+<p>When the external id is <strong>not found</strong> and the last attempt to import it failed,
+the response says why: the reason is in <code>errors[0].message</code> and, structured, in
+<code>errors[0].details.last_import_error</code>. A record that was never created has usually
+been refused, not lost &mdash; see <a href="#importerrors"><code>list_import_errors</code></a>.</p>
 
 <h3><code>list_invoices</code> parameters</h3>
 <div class="scroll"><table>
@@ -534,6 +541,112 @@ reference) or <code>invoice</code> (the ERPNext name).</p>
 </tbody></table></div>
 <p>Results respect the calling user's permissions, including User Permissions that
 restrict them to one company.</p>
+
+<h3 id="importerrors"><code>list_import_errors</code> &mdash; why a record did not import</h3>
+<p>A record that never appears was refused, not lost. This endpoint says why &mdash; the same
+message the request log holds &mdash; so nobody has to open the desk to find out. In pull mode
+it is the only place a caller ever sees the reason, because they never receive a response
+from us.</p>
+<pre><code>GET .list_import_errors
+GET .list_import_errors?external_id=E26
+GET .list_import_errors?source=Prompt%20Dev&amp;hours=24&amp;limit=50</code></pre>
+<div class="scroll"><table>
+<thead><tr><th>Param</th><th>Default</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>external_id</code></td><td>&mdash;</td><td>One record.</td></tr>
+<tr><td><code>source</code></td><td>&mdash;</td><td>One pull source, by its name under <em>Pull Sources</em>.</td></tr>
+<tr><td><code>hours</code></td><td>72</td><td>How far back to look. Capped at 720.</td></tr>
+<tr><td><code>limit</code>, <code>start</code></td><td>50, 0</td>
+    <td>Paging. <code>limit</code> is capped at <strong>200</strong>.</td></tr>
+</tbody></table></div>
+<div class="scroll"><table>
+<thead><tr><th>Response <code>data</code></th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>errors[]</code></td>
+    <td>One entry per external id whose <strong>newest</strong> attempt failed, most recent first.
+        An id that failed and has since gone through is <strong>not</strong> listed &mdash; this is
+        what still needs fixing, not a history.</td></tr>
+<tr><td><code>errors[].message</code></td><td>The reason, in words.</td></tr>
+<tr><td><code>errors[].channel</code></td>
+    <td><code>pull</code> (we fetched it) or <code>api</code> (it was sent to
+        <code>create_invoice</code>).</td></tr>
+<tr><td><code>attempts</code>, <code>first_seen</code>, <code>last_seen</code></td>
+    <td>How many times in a row it has failed, and since when.</td></tr>
+<tr><td><code>errors[].existing_invoice</code></td>
+    <td>The invoice that already owns this external id, when one does.</td></tr>
+<tr><td><code>sources[]</code></td>
+    <td>One entry per configured pull source: <code>status</code> is <code>ok</code>,
+        <code>failing</code> or <code>idle</code>. When <code>failing</code>,
+        <code>last_error</code> carries the reason &mdash; for example a refused login, with what the
+        server said &mdash; and <code>failing_since</code>.</td></tr>
+<tr><td><code>count</code>, <code>total</code>, <code>has_more</code></td><td>Paging.</td></tr>
+</tbody></table></div>
+<p>A pull source whose login is blocked, and three records that cannot import:</p>
+<pre><code>{
+  "window_hours": 72,
+  "count": 3,
+  "total": 3,
+  "start": 0,
+  "limit": 50,
+  "has_more": false,
+  "errors": [
+    {
+      "external_id": "C001",
+      "message": "external_id C001 already belongs to ACC-SINV-2026-00055, which is a Sales Invoice, but this record is a credit note. An external id identifies one document for good, so send this record under a new external_id.",
+      "channel": "pull",
+      "source": "Prompt Dev",
+      "attempts": 1,
+      "first_seen": "2026-10-20 08:58:30",
+      "last_seen": "2026-10-20 08:58:30",
+      "existing_invoice": "ACC-SINV-2026-00055",
+      "existing_document_type": "sales_invoice"
+    },
+    {
+      "external_id": "E24",
+      "message": "Exchange Rate is mandatory. Maybe Currency Exchange record is not created for KWD to SAR.",
+      "channel": "pull",
+      "source": "Prompt Dev",
+      "attempts": 1,
+      "first_seen": "2026-10-20 08:28:30",
+      "last_seen": "2026-10-20 08:28:30",
+      "existing_invoice": null,
+      "existing_document_type": null
+    },
+    {
+      "external_id": "E26",
+      "message": "A complete buyer address is mandatory for a B2B customer, because ZATCA rejects a standard invoice without one. Problems: Buyer address has no building number (custom_building_number).",
+      "channel": "pull",
+      "source": "Prompt Dev",
+      "attempts": 3,
+      "first_seen": "2026-10-20 07:43:30",
+      "last_seen": "2026-10-20 08:13:30",
+      "existing_invoice": null,
+      "existing_document_type": null
+    }
+  ],
+  "sources": [
+    {
+      "source": "Prompt Dev",
+      "enabled": true,
+      "status": "failing",
+      "last_success_at": "2026-10-20 05:59:10",
+      "last_error": {
+        "message": "Login failed for source Prompt Dev at https://prompt.example.com/api/login: 403 Client Error: Forbidden. The server said: Account has been blocked. Please contact your administrator For support.",
+        "at": "2026-10-20 09:04:10",
+        "failing_since": "2026-10-20 08:49:10",
+        "attempts": 2
+      }
+    }
+  ]
+}</code></pre>
+<p>A source counts as <em>failing</em> when its newest source-level failure &mdash; a refused
+login, an unreachable host, a crash; an attempt that never got as far as one record &mdash; is
+newer than its newest success. Failures of individual records do not make a reachable source
+<em>failing</em>; they are listed per external id instead.</p>
+<p>Visibility: pull attempts are visible to every caller; push attempts
+(<code>create_invoice</code>) only to the user who made them, so one integration cannot read
+another's rejected invoices. The caller needs the same <em>read</em> permission on Sales Invoice
+as <code>get_invoice</code>.</p>
 </section>
 
 <section id="payload">
@@ -726,7 +839,10 @@ non-empty taxes table. Set a default template for the company, or send
     <td>Missing DocType permission, bad shared secret, IP not allowed &mdash; or a
         wrong HTTP verb.</td></tr>
 <tr><td>404</td><td><code>not_found</code></td><td>Unknown invoice / external id.</td></tr>
-<tr><td>409</td><td><code>duplicate</code></td><td>External id conflict.</td></tr>
+<tr><td>409</td><td><code>duplicate</code></td>
+    <td>External id conflict: the id already belongs to a <strong>different kind of
+        document</strong> &mdash; an invoice cannot take a credit note's id, or the reverse.
+        <code>details.invoice</code> names the owner. Send the record under a new id.</td></tr>
 <tr><td>409</td><td><code>immutable_document</code></td>
     <td>External id maps to a <strong>cancelled</strong> invoice. Send a new id.</td></tr>
 <tr><td>424</td><td><code>zatca_unavailable</code></td>
@@ -772,6 +888,10 @@ Customers, Items or Addresses behind.</p>
 <tr><td>Cancelled</td>
     <td><code>409 immutable_document</code> &mdash; send a new id</td></tr>
 </tbody></table></div>
+<p>An external id also fixes the <strong>kind</strong> of document. Sending a credit note under
+the id of an existing invoice (or an invoice under a credit note's id) is refused with
+<code>409 duplicate</code>, naming the document that owns the id &mdash; it is never answered
+with <code>duplicate: true</code>, which would read as success with nothing created.</p>
 <p>The lookup takes a <code>FOR UPDATE</code> lock on the indexed column, so two
 concurrent requests carrying the same id serialise instead of racing to insert two
 invoices. <strong>Retrying is always safe</strong> &mdash; a network timeout where the
@@ -917,6 +1037,12 @@ no-op while disabled. Trigger one immediately with <code>pull_now</code>.</p>
 <p>Each invoice is committed in <strong>its own transaction</strong>, so a failure on
 invoice 40 leaves the first 39 durably imported and rolls back only the failed one.
 Dedup is by external id, so re-polling the same feed duplicates nothing.</p>
+<p><strong>When something fails, the reason is recorded and readable.</strong> A record that cannot
+be imported is logged with its message and the pull moves on to the next. A source that cannot be
+reached at all &mdash; a refused login, a dead host &mdash; is logged against the source, and a
+refused login includes what the upstream server said (for example <em>Account has been
+blocked</em>). Both are returned by <a href="#importerrors"><code>list_import_errors</code></a>, so
+the people who own the feed can see why without access to the desk.</p>
 </section>
 
 <section id="trouble">
@@ -951,11 +1077,18 @@ Dedup is by external id, so re-polling the same feed duplicates nothing.</p>
 <tr><td>Response too large</td>
     <td>Turn off <em>Include QR PNG</em> and/or <em>Include Signed XML</em>; drop
         <code>include_qr</code> from <code>list_invoices</code>.</td></tr>
+<tr><td>A record never appeared</td>
+    <td><code>GET list_import_errors?external_id=&lt;id&gt;</code> &mdash; or call
+        <code>get_status</code> on the id, whose <em>not found</em> now carries the reason. If
+        <code>sources[].status</code> is <code>failing</code>, the pull itself is down and
+        <code>last_error</code> says why (for example a login the upstream system has
+        blocked).</td></tr>
 <tr><td>Where do I see what happened?</td>
     <td><strong>ZATCA API Request Log</strong> (endpoint, status, HTTP code,
         duration, payloads, ZATCA phase / UUID / status) and
         <strong>Error Log</strong> for tracebacks. Match on
-        <code>request_id</code>.</td></tr>
+        <code>request_id</code>. The reasons for failed imports are also served by
+        <code>list_import_errors</code>.</td></tr>
 </tbody></table></div>
 </section>
 

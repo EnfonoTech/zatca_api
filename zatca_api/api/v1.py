@@ -25,15 +25,16 @@ import time
 
 import frappe
 from frappe import _
-from frappe.utils import cint, cstr, strip_html
+from frappe.utils import cint, cstr
 
-from zatca_api.services import dryrun, puller, zatca
+from zatca_api.services import dryrun, failures, puller, zatca
 from zatca_api.services import invoice as invoice_service
 from zatca_api.services.envelope import (
     ERR_INTERNAL,
     ERR_NOT_FOUND,
     ERR_VALIDATION,
     ERR_ZATCA_UNAVAILABLE,
+    clean_message,
     error_response,
     new_request_id,
     success_response,
@@ -333,7 +334,9 @@ def _create(kwargs: dict, force_return: bool, endpoint: str):
             request_id,
             payload=raw,
             response=response,
-            error=frappe.get_traceback(),
+            # The message, not the traceback: this is an expected, explainable refusal, and
+            # list_import_errors reads this column back to the caller.
+            error=message,
             external_id=raw.get('external_id'),
             http_status=frappe.local.response.get('http_status_code'),
             duration_ms=int((time.monotonic() - started) * 1000),
@@ -365,31 +368,8 @@ def _create(kwargs: dict, force_return: bool, endpoint: str):
 
 
 def _clean_message(exc) -> str:
-    """Flatten a frappe validation error into a single readable line.
-
-    ``frappe.throw(msg)`` passes the message to the exception, so ``str(exc)`` is
-    the most reliable source. ``message_log`` is only consulted when the exception
-    itself carries nothing, and only its last entry - earlier entries belong to
-    unrelated msgprints from the same request.
-    """
-    text = cstr(exc).strip()
-    if not text and frappe.message_log:
-        last = frappe.message_log[-1]
-        text = cstr(last.get('message') if isinstance(last, dict) else last)
-
-    text = strip_html(text).strip()
-
-    # Validation code that joins a message log can repeat the same line. Collapse
-    # duplicates while preserving order so the response reads as one clear error.
-    seen = set()
-    lines = []
-    for line in text.splitlines():
-        line = line.strip()
-        if line and line not in seen:
-            seen.add(line)
-            lines.append(line)
-
-    return ' '.join(lines)[:2000] or _('Validation failed.')
+    """One readable line for a frappe validation error. See ``envelope.clean_message``."""
+    return clean_message(exc)
 
 
 @frappe.whitelist(methods=['POST'])
@@ -475,12 +455,7 @@ def submit_invoice(invoice: str | None = None, external_id: str | None = None):
 
     name = _resolve_invoice(invoice, external_id)
     if not name:
-        return error_response(
-            ERR_NOT_FOUND,
-            _('Invoice not found.'),
-            request_id,
-            {'invoice': invoice, 'external_id': external_id},
-        )
+        return _not_found(request_id, invoice, external_id)
 
     try:
         require_permission('Sales Invoice', 'submit', doc=name)
@@ -541,12 +516,7 @@ def resubmit_to_zatca(invoice: str | None = None, external_id: str | None = None
 
     name = _resolve_invoice(invoice, external_id)
     if not name:
-        return error_response(
-            ERR_NOT_FOUND,
-            _('Invoice not found.'),
-            request_id,
-            {'invoice': invoice, 'external_id': external_id},
-        )
+        return _not_found(request_id, invoice, external_id)
 
     if not zatca.is_ksa_compliance_installed():
         return error_response(
@@ -600,12 +570,7 @@ def get_invoice(
 
     name = _resolve_invoice(invoice, external_id)
     if not name:
-        return error_response(
-            ERR_NOT_FOUND,
-            _('Invoice not found.'),
-            request_id,
-            {'invoice': invoice, 'external_id': external_id},
-        )
+        return _not_found(request_id, invoice, external_id)
 
     try:
         require_permission('Sales Invoice', 'read', doc=name)
@@ -653,12 +618,7 @@ def get_status(
 
     name = _resolve_invoice(invoice, external_id)
     if not name:
-        return error_response(
-            ERR_NOT_FOUND,
-            _('Invoice not found.'),
-            request_id,
-            {'invoice': invoice, 'external_id': external_id},
-        )
+        return _not_found(request_id, invoice, external_id)
 
     try:
         require_permission('Sales Invoice', 'read', doc=name)
@@ -805,6 +765,50 @@ def list_invoices(
     )
 
 
+@frappe.whitelist(methods=['GET'])
+def list_import_errors(
+    external_id: str | None = None,
+    source: str | None = None,
+    hours: int = failures.DEFAULT_HOURS,
+    limit: int = DEFAULT_PAGE_LIMIT,
+    start: int = 0,
+):
+    """Why a record did not import - and whether each pull source is working.
+
+    ``errors`` has one entry per external id whose **newest** attempt failed, most recent first:
+    the reason in plain words, how many times it has failed and since when, and the invoice that
+    already owns the id, if one does. An id that failed and has since gone through is not listed,
+    so this is the list of what still needs fixing, not a history.
+
+    ``sources`` has one entry per configured pull source: ``ok``, ``failing`` (with the reason, such
+    as a refused login, and since when) or ``idle``.
+
+    Filters: ``external_id`` for one record, ``source`` for one pull source, ``hours`` for how far
+    back to look (default 72, max 720). ``limit`` is capped at 200.
+
+    Needs the same Sales Invoice *read* permission as ``get_invoice``. Pull attempts are visible to
+    every caller; push attempts only to the user who made them.
+    """
+    request_id = new_request_id()
+
+    try:
+        settings = get_settings()
+        guard_request(settings, doctype='Sales Invoice', ptype='read')
+    except GuardError as exc:
+        return _handle_guard_error('list_import_errors', exc, request_id)
+
+    report = failures.list_failures(
+        frappe.session.user,
+        external_id=cstr(external_id).strip() or None,
+        source=cstr(source).strip() or None,
+        hours=hours,
+        limit=limit,
+        start=start,
+    )
+    report['sources'] = failures.source_health(settings)
+    return success_response(report, request_id)
+
+
 def _integration_statuses(invoice_names: list) -> dict:
     """Batch-fetch integration statuses. One query, not one per invoice."""
     if not invoice_names or not zatca.is_ksa_compliance_installed():
@@ -903,6 +907,33 @@ def pull_now(source: str | None = None):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _not_found(request_id: str, invoice: str | None, external_id: str | None) -> dict:
+    """The 'no such invoice' response - with the reason, when the log knows one.
+
+    A record that was never created has usually been refused, not lost. Saying only "not found"
+    sends the caller to a place they cannot look; when the newest attempt for this external id
+    failed, its reason is put in the message and, structured, in ``details.last_import_error``.
+    """
+    details = {'invoice': invoice, 'external_id': external_id}
+    message = _('Invoice not found.')
+
+    failure = None
+    if cstr(external_id).strip():
+        try:
+            failure = failures.latest_failure(external_id, frappe.session.user)
+        except Exception:
+            # Explaining the miss is a courtesy; it must never turn a 404 into a 500.
+            frappe.log_error(title='ZATCA API: failure lookup failed', message=frappe.get_traceback())
+
+    if failure:
+        details['last_import_error'] = failure
+        message = _('Invoice not found. The last attempt to import external_id {0} failed: {1}').format(
+            cstr(external_id).strip(), failure['message']
+        )
+
+    return error_response(ERR_NOT_FOUND, message, request_id, details)
 
 
 def _resolve_invoice(invoice: str | None, external_id: str | None) -> str | None:

@@ -2,6 +2,7 @@
 # Copyright (c) 2026, Enfono Technologies and contributors
 
 import json
+import re
 
 import frappe
 from frappe import _
@@ -14,6 +15,57 @@ from frappe.utils import add_days, cint, cstr, get_datetime, now_datetime
 TOKEN_REFRESH_MARGIN = 60
 TOKEN_CACHE_PREFIX = 'zatca_api::source_token::'
 DEFAULT_LOGIN_BODY = '{"username": "{{username}}", "password": "{{password}}"}'
+
+# Where an upstream API usually puts the reason for a refused login, in the order tried.
+REPLY_KEYS = ('error', 'message', 'detail', 'title', 'error_description', 'errormessage')
+
+
+def _redact(text: str, secrets: tuple = ()) -> str:
+    """Strip anything credential-shaped from text that is about to be shown to a caller.
+
+    The placeholders are bracketed, not angle-bracketed: the message later goes through
+    ``strip_html``, which would delete ``<redacted>`` as if it were a tag and leave a gap.
+    """
+    for secret in secrets:
+        if secret and len(secret) >= 4:
+            text = text.replace(secret, '[redacted]')
+    text = re.sub(r'[\w.+\-]+@[\w\-]+\.[\w.\-]+', '[email]', text)
+    return re.sub(r'[A-Za-z0-9_\-.]{40,}', '[redacted]', text)
+
+
+def _vendor_reply(response, secrets: tuple = ()) -> str:
+    """The reason in a failed login's reply, safe to show a caller. Empty when there is none.
+
+    A refused login is usually explained in the body ("Account has been blocked"), but
+    ``raise_for_status`` keeps only "403 Forbidden". Without the body the caller can see that the
+    login failed and not why, which is the one thing they need.
+    """
+    text = cstr(getattr(response, 'text', '') or '').strip() if response is not None else ''
+    if not text:
+        return ''
+
+    reason = ''
+    try:
+        body = json.loads(text)
+    except ValueError:
+        body = None
+
+    if isinstance(body, dict):
+        lowered = {cstr(key).lower(): value for key, value in body.items()}
+        for key in REPLY_KEYS:
+            value = lowered.get(key)
+            if isinstance(value, str) and value.strip():
+                reason = value
+                break
+            if isinstance(value, (dict, list)) and value:
+                reason = json.dumps(value)
+                break
+
+    if not reason:
+        # Not JSON: an HTML error page, as IIS and nginx serve.
+        reason = re.sub(r'<[^>]+>', ' ', text)
+
+    return _redact(' '.join(reason.split()), secrets)[:300]
 
 
 def _jwt_expiry(token: str) -> int | None:
@@ -124,6 +176,7 @@ class ZATCAAPISource(Document):
                 )
             )
 
+        response = None
         try:
             response = requests.post(
                 self.token_url,
@@ -135,12 +188,18 @@ class ZATCAAPISource(Document):
             response.raise_for_status()
             data = response.json()
         except Exception as exc:
-            # Deliberately does not log the request body: it holds the password.
-            frappe.throw(
-                _('Login failed for source {0} at {1}: {2}').format(
-                    self.source_name, self.token_url, cstr(exc)[:200]
-                )
+            # Deliberately does not log the request body: it holds the password. What the server
+            # SAID is included, redacted: it is usually the reason ("Account has been blocked"),
+            # and without it a caller only ever sees "403 Forbidden".
+            # requests' own text already ends with "for url: <url>", which the sentence has said.
+            detail = re.sub(r'\s+for url:\s*\S+', '', cstr(exc))[:200].rstrip('. ')
+            message = _('Login failed for source {0} at {1}: {2}.').format(
+                self.source_name, self.token_url, detail
             )
+            reason = _vendor_reply(response, (secret, cstr(self.auth_username)))
+            if reason:
+                message += ' ' + _('The server said: {0}').format(reason)
+            frappe.throw(message)
 
         path = cstr(self.token_response_path).strip() or 'data.token'
         token = data

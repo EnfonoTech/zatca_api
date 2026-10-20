@@ -46,7 +46,7 @@ from frappe import _
 from frappe.utils import cint, cstr, flt, getdate, now, nowtime
 
 from zatca_api.services import masters
-from zatca_api.services.envelope import ERR_IMMUTABLE
+from zatca_api.services.envelope import ERR_DUPLICATE, ERR_IMMUTABLE
 from zatca_api.services.payload import PayloadError, apply_field_mappings, validate_invoice
 
 EXTERNAL_ID_FIELD = 'zatca_api_external_id'
@@ -522,6 +522,38 @@ def _reset_party_fields(doc, customer: str) -> None:
             doc.set(field, None)
 
 
+def _refuse_kind_clash(existing: dict, payload: dict) -> None:
+    """An external id names one document for good, and that includes what kind of document it is.
+
+    Without this, a credit note sent under the id of an invoice that already exists is answered
+    ``duplicate``, which reads as success, while no credit note was ever made. Seen on the test
+    site: the feed's credit note ``C001`` kept coming back as a duplicate of the Sales Invoice an
+    older build had created under that id. Refusing it by name puts the reason where the caller
+    can read it.
+    """
+    existing_return = bool(cint(existing['is_return']))
+    new_return = bool(cint(payload.get('is_return')))
+    if existing_return == new_return:
+        return
+
+    existing_kind = _('credit note') if existing_return else _('Sales Invoice')
+    new_kind = _('credit note') if new_return else _('Sales Invoice')
+    raise PayloadError(
+        _(
+            'external_id {0} already belongs to {1}, which is a {2}, but this record is a {3}. '
+            'An external id identifies one document for good, so send this record under a new '
+            'external_id.'
+        ).format(payload['external_id'], existing['name'], existing_kind, new_kind),
+        {
+            'field': 'external_id',
+            'invoice': existing['name'],
+            'existing_document_type': 'credit_note' if existing_return else 'sales_invoice',
+            'document_type': 'credit_note' if new_return else 'sales_invoice',
+        },
+        code=ERR_DUPLICATE,
+    )
+
+
 def build_invoice(payload: dict, settings) -> tuple:
     """Create or update the Sales Invoice. Returns ``(InvoiceResult, warnings)``."""
     # Before validation: validate_invoice checks the original by ERPNext name only.
@@ -537,6 +569,7 @@ def build_invoice(payload: dict, settings) -> tuple:
     existing = find_by_external_id(payload['external_id'], lock=True)
 
     if existing:
+        _refuse_kind_clash(existing, payload)
         if cint(existing['docstatus']) == 1:
             return (
                 InvoiceResult(existing['name'], 'duplicate', 1, warnings),

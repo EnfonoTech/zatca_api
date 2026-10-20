@@ -2122,7 +2122,8 @@ element of the XML. Send <code>return_reason</code>.</p>
 <li>The credit note gets its <strong>own</strong> ZATCA counter, hash and QR, and takes its
     place in the same hash chain as every other invoice.</li>
 <li><code>external_id</code> must be unique for the credit note too &mdash; do not reuse the
-    original invoice&rsquo;s id.</li>
+    original invoice&rsquo;s id. It is refused with <code>409 duplicate</code>, naming the invoice
+    that owns the id.</li>
 </ul>
 
 <div class="note">
@@ -2145,7 +2146,8 @@ messages are translated and may change.</p>
 <tr><td>400</td><td><code>validation_error</code></td><td>Bad payload. <code>details</code> names the field.</td><td>No &mdash; fix and resend</td></tr>
 <tr><td>401</td><td><code>unauthorized</code></td><td>No valid session</td><td>No &mdash; fix credentials</td></tr>
 <tr><td>403</td><td><code>forbidden</code></td><td>Missing permission, or wrong HTTP verb</td><td>No</td></tr>
-<tr><td>404</td><td><code>not_found</code></td><td>Unknown invoice / external id</td><td>No</td></tr>
+<tr><td>404</td><td><code>not_found</code></td><td>Unknown invoice / external id. When the last attempt to import that id failed, <code>message</code> and <code>details.last_import_error</code> say why</td><td>No &mdash; read the reason</td></tr>
+<tr><td>409</td><td><code>duplicate</code></td><td>The external id already belongs to a <strong>different kind of document</strong> &mdash; an invoice cannot take a credit note&rsquo;s id, or the reverse</td><td>No &mdash; use a new id</td></tr>
 <tr><td>409</td><td><code>immutable_document</code></td><td>External id maps to a cancelled invoice</td><td>No &mdash; use a new id</td></tr>
 <tr><td>424</td><td><code>zatca_unavailable</code></td><td>ZATCA app not installed on our side</td><td>Tell us</td></tr>
 <tr><td>500</td><td><code>internal_error</code></td><td>Our bug</td><td><strong>Yes</strong> &mdash; send us the <code>request_id</code></td></tr>
@@ -2208,6 +2210,66 @@ messages are translated and may change.</p>
 }</code></pre>
 <p>Note <code>details.problems</code> lists each gap and <code>details.required</code>
 tells you exactly what to send. Surface these to whoever maintains customer data.</p>
+
+<h3>A not-found that says why</h3>
+<p>A record that never arrived was usually refused, not lost. Ask for it by <code>external_id</code>
+and the <code>not_found</code> answer carries the last failure, in words:</p>
+<pre><code>{
+  &quot;success&quot;: false,
+  &quot;request_id&quot;: &quot;0cc37a8f62f2&quot;,
+  &quot;timestamp&quot;: &quot;2026-10-20 09:21:36.289257&quot;,
+  &quot;data&quot;: {},
+  &quot;warnings&quot;: [],
+  &quot;errors&quot;: [
+    {
+      &quot;code&quot;: &quot;not_found&quot;,
+      &quot;message&quot;: &quot;Invoice not found. The last attempt to import external_id E26 failed: A complete buyer address is mandatory for a B2B customer, because ZATCA rejects a standard invoice without one. Problems: Buyer address has no building number (custom_building_number).&quot;,
+      &quot;details&quot;: {
+        &quot;invoice&quot;: null,
+        &quot;external_id&quot;: &quot;E26&quot;,
+        &quot;last_import_error&quot;: {
+          &quot;external_id&quot;: &quot;E26&quot;,
+          &quot;message&quot;: &quot;A complete buyer address is mandatory for a B2B customer, because ZATCA rejects a standard invoice without one. Problems: Buyer address has no building number (custom_building_number).&quot;,
+          &quot;channel&quot;: &quot;pull&quot;,
+          &quot;source&quot;: &quot;Prompt Dev&quot;,
+          &quot;attempts&quot;: 1,
+          &quot;first_seen&quot;: &quot;2026-10-20 09:18:36&quot;,
+          &quot;last_seen&quot;: &quot;2026-10-20 09:18:36&quot;,
+          &quot;existing_invoice&quot;: null,
+          &quot;existing_document_type&quot;: null
+        }
+      }
+    }
+  ]
+}</code></pre>
+<p>To see <em>every</em> record that still fails, and whether a pull source can be reached at all, call
+<code>GET /api/method/zatca_api.api.v1.list_import_errors</code>. A record that failed and later went
+through is not listed. See the <a href="/user-guide#importerrors">user guide</a> for the full
+response.</p>
+
+<h3>An external id belongs to one kind of document</h3>
+<p>Sending a credit note under the id of an existing invoice &mdash; or an invoice under a credit
+note&rsquo;s id &mdash; is refused, naming the document that owns the id. It is never answered with
+<code>"duplicate": true</code>, which would read as success with nothing created.</p>
+<pre><code>{
+  &quot;success&quot;: false,
+  &quot;request_id&quot;: &quot;a104c6e183f3&quot;,
+  &quot;timestamp&quot;: &quot;2026-10-20 09:21:37.679617&quot;,
+  &quot;data&quot;: {},
+  &quot;warnings&quot;: [],
+  &quot;errors&quot;: [
+    {
+      &quot;code&quot;: &quot;duplicate&quot;,
+      &quot;message&quot;: &quot;external_id C001 already belongs to ACC-SINV-2026-00056, which is a Sales Invoice, but this record is a credit note. An external id identifies one document for good, so send this record under a new external_id.&quot;,
+      &quot;details&quot;: {
+        &quot;field&quot;: &quot;external_id&quot;,
+        &quot;invoice&quot;: &quot;ACC-SINV-2026-00056&quot;,
+        &quot;existing_document_type&quot;: &quot;sales_invoice&quot;,
+        &quot;document_type&quot;: &quot;credit_note&quot;
+      }
+    }
+  ]
+}</code></pre>
 
 <h3>Retrying &mdash; the important part</h3>
 <p>Network timeouts happen, and you cannot tell a lost request from a lost response. So
@@ -2413,6 +2475,7 @@ invoice of each kind you tested.</p>
 <li>You can tie your record to ours: <code>data.invoice.invoice</code>, or simply your own <code>external_id</code>, which <code>return_against</code> also accepts</li>
 <li>The QR is rendered on your invoice output</li>
 <li><code>warnings</code> are logged, not discarded</li>
+<li>When a record does not arrive you read the reason (<code>list_import_errors</code>, or the <code>not_found</code> message) &mdash; you do not guess</li>
 <li>Item codes and your UOM list shared with us so masters can be pre-created</li>
 <li><code>validate_payload</code> returns <code>valid: true</code> with empty
     <code>errors</code> <strong>and</strong> empty
