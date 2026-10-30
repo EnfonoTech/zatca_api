@@ -220,6 +220,13 @@ outcome. Do **not** set *Wait For Clearance* to hold the HTTP connection open.
 
 Creating the invoice still **succeeded** in all of these. Branch on the flag.
 
+When the cause is the company's ZATCA setup — no settings at all, or ZATCA Business
+Settings that exist but were never onboarded — the block also carries
+`"setup_required": true` and a `setup` object: `message`, `phase`, `onboarded` and an
+ordered `steps[]` list of what to do in ERPNext. It is the same text for every invoice of
+that company, so `list_invoices` leaves it out. See
+[Setting up ZATCA in ERPNext](#setting-up-zatca-in-erpnext).
+
 ---
 
 ## 6. Endpoints
@@ -270,10 +277,11 @@ Response `data`:
 | `errors[]` | Every problem, each naming the exact field. |
 | `warnings[]` | Non-fatal, mostly incomplete buyer address. |
 | `totals` | The **real** ERPNext totals — net, tax, grand, plus each tax row. |
-| `would_create` | Which Customer / Items / UOMs would be new. A large unexpected `new_items` means unstable item codes. |
+| `would_create` | Which Customer / Items / UOMs would be new. A large unexpected `new_items` means unstable item codes. `new_company` names the company a real request would create, or is `null`. |
 | `resolved` | What the payload parsed to, and any existing invoice with that `external_id`. |
 | `zatca` | `invoice_type` (`Standard`/`Simplified`), `buyer_is_b2b`, and the `reason`. |
 | `zatca_readiness` | `would_be_rejected_by_zatca` plus `blocking` and `advisory` lists. |
+| `zatca_setup` | The ERPNext setup steps for the company, or `null` when it already reports to ZATCA. Same shape as `data.zatca.setup`. |
 | `dry_run` | Always `true`. |
 
 **How it can promise "writes nothing" and still give real totals.** The payload runs
@@ -286,6 +294,13 @@ only**, never submitted, so no GL entry is written and nothing is filed with ZAT
 
 It requires the same `create` permission on Sales Invoice as the real endpoint, so it
 cannot be used to probe the site anonymously.
+
+**An unknown company is reported, not created.** Creating one builds a chart of accounts,
+warehouses and cost centres, and some of that cannot be rolled back, so the dry run keeps
+its promise by not doing it. `would_create.new_company` names the company, `valid` stays
+`true`, and a warning says the ERPNext totals and the item, customer and tax checks were
+skipped because there is no company to compute them against. Send the payload for real once,
+then validate again for the full report.
 > **What the dry run does not cover.** It validates *creation*, not *submission* — the
 > invoice is inserted as a draft and rolled back, never submitted. Checks that only run
 > when GL entries are posted therefore pass here and can still fail on the real call.
@@ -330,6 +345,15 @@ Response `data`:
 `tax_id`, `posting_date`, `posting_time`, `due_date`, `currency`,
 `conversion_rate`, `net_total`, `total_taxes_and_charges`, `grand_total`,
 `rounded_total`, `outstanding_amount`, `project`, plus `items[]` and `taxes[]`.
+
+**A company that does not exist is created.** If `company` names an existing company
+the request uses it, untouched. If it names one that does not exist, the request
+creates it (abbreviation from the initials of the name, made unique; country from
+*Default Country*, Saudi Arabia if that is blank; the country's currency) and says so
+in `warnings`. A new company has **no ZATCA settings**, so `data.zatca.setup` carries the
+steps to take in ERPNext — see [Setting up ZATCA in ERPNext](#setting-up-zatca-in-erpnext).
+Creation is not undone if the invoice itself is then refused: the next request finds the
+company and uses it.
 
 ### Credit notes — the same `create_invoice`
 
@@ -543,7 +567,7 @@ parentheses.
 
 | Field | Aliases | Notes |
 |---|---|---|
-| `company` | `company_name` | Falls back to Default Company. |
+| `company` | `company_name` | Falls back to Default Company. **Created if it does not exist** (country from *Default Country*, Saudi Arabia if blank, in that country's currency), and the response then says how to set ZATCA up for it. See §10. |
 | `tax_id` | `vat_number`, `vat_registration_number`, `buyer_vat` | Buyer VAT. Also written to `Customer.custom_vat_registration_number` — see §10. |
 | `buyer_id_type` / `buyer_id_value` | `crn`, `commercial_registration` | ZATCA codes: `TIN CRN MOM MLS SAG NAT GCC IQA PAS OTH`. Use when the buyer has no VAT number. |
 | `posting_date` | `invoice_date`, `date` | Defaults to today. **Never in the future** — ZATCA forbids a future issue date (`BR-KSA-04`), so a future date is refused before anything is written. Backdating is fine. |
@@ -801,6 +825,44 @@ Work through this before going live. `ping` reports items 1–3.
    `list_invoices?integration_status=Rejected` and refile with
    `resubmit_to_zatca`.
 
+### Setting up ZATCA in ERPNext
+
+This part cannot be done over the API: onboarding needs the taxpayer's one-time password
+from the Fatoora portal. It applies to any company that has no ZATCA settings — above all
+one this API just created. `data.zatca.setup.steps` (and `zatca_setup` on a dry run)
+returns the same list:
+
+1. **Company.** Open the company in ERPNext (Accounting > Company), set its Tax ID to the
+   15-digit VAT registration number (starts and ends with 3), and create an Address linked
+   to it: street, building number (4 digits), district, city, postal code (5 digits),
+   country.
+2. **Phase 2** (invoices are cleared or reported to ZATCA). Search *ZATCA Business
+   Settings* in the awesomebar and create one for the company. Pick the Company and Company
+   Address; fill Seller Name, VAT Registration Number and the Additional IDs (for example
+   the commercial registration number); choose the Fatoora Server (Sandbox, Simulation or
+   Production), Type of Business Transactions and Sync with ZATCA.
+3. **VAT account.** On the same form switch on *Automatic VAT Account Configuration* (VAT
+   Account Configuration tab) so the 15% VAT account and its Sales Taxes and Charges
+   Template exist. A new company has neither, and an invoice with no explicit taxes is
+   rejected without them.
+4. **Onboard.** On the Integration tab run *Download and Set Up ZATCA CLI*, get a one-time
+   password from the Fatoora portal (fatoora.zatca.gov.sa) and click *Onboard*. After the
+   compliance checks pass, get a fresh OTP, click *Get Production CSID* and set Status to
+   Active.
+5. **Phase 1 instead** (a QR code only, nothing sent to ZATCA): create *ZATCA Phase 1
+   Business Settings* for the company, with its VAT registration number and address. A
+   company is Phase 1 or Phase 2, never both.
+6. **Until then, nothing is reported.** An invoice submitted before the settings are active
+   is not filed with ZATCA. Send `"submit": false` so invoices stay drafts, then call
+   `submit_invoice` once the settings are active. Use `resubmit_to_zatca` for any invoice
+   whose filing failed.
+
+If the settings row already exists but has no production CSID — some benches create an
+empty one the moment a company is inserted — only steps 2 (complete it), 4 and 6 apply,
+and `setup.phase` is `Phase 2` with `onboarded: false`.
+
+`ping` shows which companies are Phase 1, Phase 2 or neither.
+
 ### Free-text address parsing
 
 When the source system only exports one address line, enable *Parse Free-Text
@@ -911,7 +973,8 @@ Project.
 |---|---|
 | `403` on every call | Bad or missing `Authorization` header; wrong header format (`token key:secret`); user lacks Sales Invoice permission; shared secret required but not sent. Also returned for a wrong HTTP verb. |
 | `zatca.available = false`, reason mentions Draft | *Auto Submit* is off, or you sent `"submit": false`. |
-| `zatca.available = false`, reason mentions settings | No `ZATCA Business Settings` (Active) or `ZATCA Phase 1 Business Settings` for the company. |
+| `zatca.available = false`, reason mentions settings | No `ZATCA Business Settings` (Active) or `ZATCA Phase 1 Business Settings` for the company. `zatca.setup.steps` lists what to do — see §10. |
+| A warning says a company "was created" | The `company` in the payload did not exist. Check the spelling; if it is right, set ZATCA up for it (§10). A misspelt name creates a second company. |
 | `available` true but `integration_status` stuck at `Ready For Batch` | The background job has not run. Check `bench worker` / the scheduler is up, and `sync_with_zatca` on the business settings. |
 | `custom_fields_installed = false` | Run `bench --site <site> migrate`. |
 | Invoice filed as *simplified* when it should be *standard* | Buyer not recognised as B2B. Send `tax_id` (or `buyer_id_type`/`buyer_id_value`) — see §10 item 5. |

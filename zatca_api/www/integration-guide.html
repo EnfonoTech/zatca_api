@@ -1894,7 +1894,7 @@ canonical &mdash; build to these.</p>
 <div class="scroll"><table>
 <thead><tr><th>Field</th><th>Notes</th></tr></thead>
 <tbody>
-<tr><td><code>company</code></td><td>Omit to use the configured default.</td></tr>
+<tr><td><code>company</code></td><td>Omit to use the configured default. Created if it does not exist; the response then carries the steps to set ZATCA up for it in ERPNext (<code>data.zatca.setup</code>).</td></tr>
 <tr><td><code>tax_id</code></td><td>Buyer VAT number. <strong>Sending this makes it a standard (B2B) invoice.</strong></td></tr>
 <tr><td><code>buyer_id_type</code> + <code>buyer_id_value</code></td>
     <td>For a business buyer with no VAT number. Codes: TIN, CRN, MOM, MLS, SAG, NAT, GCC, IQA, PAS, OTH.</td></tr>

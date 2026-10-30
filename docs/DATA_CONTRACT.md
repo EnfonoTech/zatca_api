@@ -267,8 +267,14 @@ You get back:
 }
 ```
 
-**Nothing is written.** No invoice, no customer, no item. Run it as often as you like
-against the live site.
+**Nothing is written.** No invoice, no customer, no item, no company. Run it as often as
+you like against the live site.
+
+If `company` names a company that does not exist, a real request creates it. The dry run
+cannot, so it reports `would_create.new_company` and skips the ERPNext totals and the item,
+customer and tax checks. Send one real invoice, then validate again for the full report.
+A company created this way has no ZATCA settings; the response carries the steps the
+site owner takes in ERPNext (`data.zatca.setup`, and `zatca_setup` on a dry run).
 
 One limit to know: the dry run validates *creation*, not *submission*. It inserts a
 draft and rolls it back, so checks that only run when the accounting entries are posted

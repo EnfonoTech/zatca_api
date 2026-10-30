@@ -27,7 +27,7 @@ from frappe import _
 from frappe.utils import cint, cstr, flt
 
 from zatca_api.services import invoice as invoice_service
-from zatca_api.services import zatca
+from zatca_api.services import masters, zatca
 from zatca_api.services.envelope import ERR_VALIDATION, clean_message, item_error
 from zatca_api.services.payload import PayloadError, normalise_invoice
 
@@ -105,6 +105,7 @@ def dry_run(raw: dict, settings, is_return: bool = False) -> dict:
     if payload.get('is_return'):
         report['resolved']['return_against'] = payload.get('return_against') or None
     report['would_create'] = _existing_masters(payload)
+    report['would_create']['new_company'] = None
 
     existing = invoice_service.find_by_external_id(payload.get('external_id'))
     if existing:
@@ -115,9 +116,40 @@ def dry_run(raw: dict, settings, is_return: bool = False) -> dict:
         )
         report['resolved']['existing_invoice'] = existing['name']
 
-    # Phase 2: build for real inside a savepoint, then throw the work away. This is
-    # what makes the totals and the error list trustworthy -- they come from
-    # ERPNext and ksa_compliance, not from a parallel reimplementation.
+    company_name = masters.resolve_company_name(payload, settings)
+    if company_name and not frappe.db.exists('Company', company_name):
+        # A real request creates the company. The dry run cannot: creating one builds a chart
+        # of accounts, warehouses and cost centres, and a rollback that is not certain to undo
+        # all of that would break the promise that nothing is kept. So say what would happen
+        # and skip the build -- there is no company to compute totals against.
+        report['would_create']['new_company'] = company_name
+        report['valid'] = True
+        report['warnings'].append(
+            _(
+                'Company {0} does not exist. A real request creates it, and this check does not, so '
+                'the ERPNext totals and the item, customer and tax checks were skipped. Send the '
+                'payload for real once, then validate again for the full report.'
+            ).format(company_name)
+        )
+    else:
+        _build_and_discard(report, payload, settings)
+
+    if not report['zatca']:
+        company = report['resolved'].get('company')
+        if company:
+            report['zatca'] = zatca.classify_invoice_type(company, payload.get('customer'))
+
+    report['zatca_readiness'] = _zatca_readiness(report, payload)
+    report['zatca_setup'] = zatca.setup_guidance(company_name, settings)
+    return report
+
+
+def _build_and_discard(report: dict, payload: dict, settings) -> None:
+    """Build for real inside a savepoint, then throw the work away.
+
+    This is what makes the totals and the error list trustworthy -- they come from
+    ERPNext and ksa_compliance, not from a parallel reimplementation.
+    """
     frappe.db.savepoint(SAVEPOINT)
     try:
         result, warnings = invoice_service.build_invoice(payload, settings)
@@ -158,14 +190,6 @@ def dry_run(raw: dict, settings, is_return: bool = False) -> dict:
     finally:
         # Unconditional. Nothing this function did survives, on any path.
         frappe.db.rollback(save_point=SAVEPOINT)
-
-    if not report['zatca']:
-        company = report['resolved'].get('company')
-        if company:
-            report['zatca'] = zatca.classify_invoice_type(company, payload.get('customer'))
-
-    report['zatca_readiness'] = _zatca_readiness(report, payload)
-    return report
 
 
 def _zatca_readiness(report: dict, payload: dict) -> dict:

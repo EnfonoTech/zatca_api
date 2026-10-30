@@ -774,10 +774,7 @@ class TestValidationErrors(ZATCAAPITestCase):
         self.assertEqual(response['errors'][0]['code'], 'validation_error')
         self.assertIn('customer', response['errors'][0]['details']['missing'])
 
-    def test_unknown_company_is_rejected(self):
-        response = v1.create_invoice(**_payload('ZAPI-BAD-002', company='No Such Company Ltd'))
-        self.assertFalse(response['success'])
-        self.assertIn('does not exist', response['errors'][0]['message'])
+    # An unknown company is no longer an error: it is created. See test_company_autocreate.py.
 
     def test_no_items_is_rejected(self):
         response = v1.create_invoice(**_payload('ZAPI-BAD-003', items=[]))

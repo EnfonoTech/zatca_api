@@ -80,6 +80,138 @@ def get_phase_for_company(company: str) -> str:
     return 'None'
 
 
+def _phase_2_settings(company: str) -> dict | None:
+    """The active ZATCA Business Settings row for a company, with its onboarding fields."""
+    return frappe.db.get_value(
+        'ZATCA Business Settings',
+        {'company': company, 'status': 'Active'},
+        ['name', 'production_security_token', 'production_request_id'],
+        as_dict=True,
+    )
+
+
+def _phase_2_onboarded(business_settings: dict | None) -> bool:
+    """True once a production CSID has been issued, which is what lets invoices reach ZATCA.
+
+    The settings row alone proves nothing: another app can create an empty one the moment a
+    company is inserted, and ksa_compliance saves it as Active before any onboarding.
+    """
+    return bool(
+        business_settings
+        and business_settings.get('production_security_token')
+        and business_settings.get('production_request_id')
+    )
+
+
+def setup_guidance(company: str, settings=None) -> dict | None:
+    """How to get ``company`` reporting to ZATCA from inside ERPNext, or None if it already does.
+
+    Written for the person who owns the ERPNext site, not for the API caller: creating a
+    company over the API gives it no ZATCA settings, and nothing here can onboard it
+    (that needs the taxpayer's Fatoora OTP). So the response says what to do instead of
+    leaving the caller with an invoice that silently never reaches ZATCA.
+    """
+    if not company or (settings is not None and (settings.zatca_phase or 'Auto') == 'Disabled'):
+        return None
+
+    phase = get_phase_for_company(company)
+    if phase == 'Phase 1':
+        return None
+
+    business_settings = _phase_2_settings(company) if phase == 'Phase 2' else None
+    if phase == 'Phase 2' and _phase_2_onboarded(business_settings):
+        return None
+
+    onboarding_step = _(
+        'Onboard: on the Integration tab run Download and Set Up ZATCA CLI, then get a one-time '
+        'password from the Fatoora portal (fatoora.zatca.gov.sa) and click Onboard. After the '
+        'compliance checks pass, get a fresh OTP, click Get Production CSID and set Status to Active.'
+    )
+    drafts_step = _(
+        'Until that is done, invoices for this company are NOT reported to ZATCA. Send "submit": false '
+        'so they stay drafts, then call submit_invoice once the settings are active. Call '
+        'resubmit_to_zatca for any invoice whose filing failed.'
+    )
+
+    if phase == 'Phase 2':
+        # The row exists (often created empty by another app) but no production CSID was issued.
+        name = (business_settings or {}).get('name')
+        message = _(
+            'ZATCA Business Settings {0} exists for company {1} but onboarding is not finished, so its '
+            'invoices cannot be cleared or reported to ZATCA yet. Follow the steps.'
+        ).format(name or '', company)
+        steps = [
+            _(
+                'Open ZATCA Business Settings {0} in ERPNext and complete the Seller Details: Seller '
+                'Name, VAT Registration Number (15 digits, starts and ends with 3), Company Address and '
+                'the Additional IDs (for example the commercial registration number). Choose the Fatoora '
+                'Server (Sandbox, Simulation or Production) and Type of Business Transactions.'
+            ).format(name or ''),
+            onboarding_step,
+            drafts_step,
+        ]
+    else:
+        message = _(
+            'ZATCA is not set up for company {0} in ERPNext, so its invoices are not reported to ZATCA. '
+            'Follow the steps.'
+        ).format(company)
+        steps = []
+        if not is_ksa_compliance_installed():
+            steps.append(
+                _(
+                    'Install the ksa_compliance app on this site (bench get-app ksa_compliance, then '
+                    'bench --site <site> install-app ksa_compliance). Nothing below exists without it.'
+                )
+            )
+        steps += [
+            _(
+                'Company: open {0} in ERPNext (Accounting > Company), set its Tax ID to the 15-digit VAT '
+                'registration number (it starts and ends with 3), and create an Address linked to the '
+                'company with street, building number (4 digits), district, city, postal code (5 digits) '
+                'and country.'
+            ).format(company),
+            _(
+                'Phase 2 (invoices are cleared or reported to ZATCA): search "ZATCA Business Settings" in '
+                'the ERPNext awesomebar and create one for {0}. Pick the Company and Company Address, '
+                'fill Seller Name, VAT Registration Number and the Additional IDs (for example the '
+                'commercial registration number), then choose the Fatoora Server (Sandbox, Simulation or '
+                'Production), Type of Business Transactions and Sync with ZATCA.'
+            ).format(company),
+            _(
+                'On the same form switch on Automatic VAT Account Configuration (VAT Account '
+                'Configuration tab) so the 15% VAT account and its Sales Taxes and Charges Template are '
+                'created. A new company has neither unless another app made them, and without them an '
+                'invoice with no explicit taxes is rejected.'
+            ),
+            onboarding_step,
+            _(
+                'Phase 1 only (a QR code, nothing sent to ZATCA): create ZATCA Phase 1 Business Settings '
+                'for {0} instead, with its VAT registration number and address. A company is Phase 1 or '
+                'Phase 2, never both.'
+            ).format(company),
+            drafts_step,
+        ]
+
+    return {
+        'company': company,
+        'phase': phase,
+        'onboarded': False,
+        'ksa_compliance_installed': is_ksa_compliance_installed(),
+        'message': message,
+        'steps': steps,
+    }
+
+
+def _with_setup(block: dict, company: str | None, settings, include_setup: bool) -> dict:
+    """Attach the setup guidance to a ZATCA block that says no QR could be produced."""
+    if include_setup:
+        guidance = setup_guidance(company, settings)
+        if guidance:
+            block['setup_required'] = True
+            block['setup'] = guidance
+    return block
+
+
 def _render_qr_png(qr_content: str) -> dict:
     """Render a QR payload string to PNG. Returns {} when rendering is unavailable."""
     if not qr_content:
@@ -311,6 +443,7 @@ def get_zatca_details(
     include_png: bool | None = None,
     include_xml: bool | None = None,
     include_zatca_message: bool | None = None,
+    include_setup: bool = True,
 ) -> dict:
     """Return the ZATCA block for an invoice.
 
@@ -340,21 +473,31 @@ def get_zatca_details(
         return {'available': False, 'phase': 'Disabled', 'reason': 'ZATCA reporting disabled in settings.'}
 
     if not is_ksa_compliance_installed():
-        return {
-            'available': False,
-            'phase': 'None',
-            'reason': 'The ksa_compliance app is not installed on this site, so no ZATCA QR can be produced.',
-        }
+        return _with_setup(
+            {
+                'available': False,
+                'phase': 'None',
+                'reason': 'The ksa_compliance app is not installed on this site, so no ZATCA QR can be produced.',
+            },
+            company or frappe.db.get_value(doctype, invoice_name, 'company'),
+            settings,
+            include_setup,
+        )
 
     docstatus = frappe.db.get_value(doctype, invoice_name, 'docstatus')
     if docstatus is None:
         return {'available': False, 'phase': 'None', 'reason': f'{doctype} {invoice_name} not found.'}
     if cint(docstatus) == 0:
-        return {
-            'available': False,
-            'phase': 'None',
-            'reason': 'Invoice is in Draft. A ZATCA QR only exists for a submitted invoice.',
-        }
+        return _with_setup(
+            {
+                'available': False,
+                'phase': 'None',
+                'reason': 'Invoice is in Draft. A ZATCA QR only exists for a submitted invoice.',
+            },
+            company or frappe.db.get_value(doctype, invoice_name, 'company'),
+            settings,
+            include_setup,
+        )
 
     if phase_setting in ('Auto', 'Phase 2 Only'):
         details = _phase_2_details(invoice_name, doctype, flags)
@@ -376,14 +519,20 @@ def get_zatca_details(
         if details:
             return details
 
-    return {
-        'available': False,
-        'phase': get_phase_for_company(company or frappe.db.get_value(doctype, invoice_name, 'company')),
-        'reason': (
-            'No ZATCA settings resolved for this company. Configure ZATCA Business Settings (Phase 2) '
-            'or ZATCA Phase 1 Business Settings.'
-        ),
-    }
+    company = company or frappe.db.get_value(doctype, invoice_name, 'company')
+    return _with_setup(
+        {
+            'available': False,
+            'phase': get_phase_for_company(company),
+            'reason': (
+                'No ZATCA settings resolved for this company. Configure ZATCA Business Settings (Phase 2) '
+                'or ZATCA Phase 1 Business Settings.'
+            ),
+        },
+        company,
+        settings,
+        include_setup,
+    )
 
 
 def wait_for_clearance(invoice_name: str, doctype: str, seconds: int) -> dict | None:

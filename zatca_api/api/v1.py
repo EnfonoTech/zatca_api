@@ -744,8 +744,9 @@ def list_invoices(
 
     if include_qr:
         for row in rows:
+            # The setup steps are per company, not per row, so a listing leaves them out.
             row['zatca'] = zatca.get_zatca_details(
-                row['name'], 'Sales Invoice', settings=settings, company=row['company']
+                row['name'], 'Sales Invoice', settings=settings, company=row['company'], include_setup=False
             )
     else:
         statuses = _integration_statuses([row['name'] for row in rows])

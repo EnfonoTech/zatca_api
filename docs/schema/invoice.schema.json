@@ -27,7 +27,7 @@
     },
     "company": {
       "type": "string",
-      "description": "Selling company. Omit to use the configured default."
+      "description": "Selling company. Omit to use the configured default. Created if it does not exist; the response then carries the steps to set ZATCA up for it in ERPNext."
     },
     "tax_id": {
       "type": "string",

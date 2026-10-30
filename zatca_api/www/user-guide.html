@@ -323,12 +323,24 @@ that carries neither <code>return_against</code> nor <code>is_return</code>.</p>
         mismatch means a tax or discount misunderstanding.</td></tr>
 <tr><td><code>would_create</code></td>
     <td>Which Customer / Items / UOMs would be new. A large unexpected
-        <code>new_items</code> means unstable item codes.</td></tr>
+        <code>new_items</code> means unstable item codes. <code>new_company</code> names the
+        company a real request would create, or is <code>null</code>.</td></tr>
 <tr><td><code>zatca.invoice_type</code></td>
     <td><code>Standard</code> or <code>Simplified</code>, plus the reason.</td></tr>
 <tr><td><code>zatca_readiness.blocking</code></td>
     <td>The things ZATCA <em>will</em> reject. Must be empty.</td></tr>
+<tr><td><code>zatca_setup</code></td>
+    <td>The ERPNext setup steps for the company, or <code>null</code> when it already
+        reports to ZATCA.</td></tr>
 </tbody></table></div>
+<div class="note">
+<p><strong>An unknown company is reported, not created.</strong> Creating one builds a chart
+of accounts, warehouses and cost centres, and some of that cannot be rolled back, so the dry
+run keeps its promise by not doing it. <code>would_create.new_company</code> names the
+company and <code>valid</code> stays <code>true</code>, with a warning that the ERPNext
+totals and the item, customer and tax checks were skipped. Send the payload for real once,
+then validate again for the full report.</p>
+</div>
 <div class="note">
 <p><strong>How it writes nothing yet gives real totals.</strong> The payload runs
 through the same code path as a real request, inside a database savepoint that is
@@ -437,6 +449,11 @@ outcome. Do not hold the HTTP connection open waiting.</p>
 <p><code>reason</code> says why &mdash; usually the invoice is still in Draft, the
 company has no ZATCA settings, or <code>ksa_compliance</code> is not installed.
 <strong>Creating the invoice still succeeded</strong> in every one of those cases.</p>
+<p>When the cause is the company&rsquo;s ZATCA setup &mdash; no settings at all, or ZATCA
+Business Settings that were never onboarded &mdash; the block also carries
+<code>"setup_required": true</code> and a <code>setup</code> object: <code>message</code>,
+<code>phase</code>, <code>onboarded</code> and an ordered <code>steps[]</code> list of what to
+do in ERPNext. See <a href="#zatca-setup">Setting up ZATCA in ERPNext</a>.</p>
 </section>
 
 <section id="endpoints">
@@ -672,7 +689,7 @@ and <code>CUSTOMER_NAME</code> all resolve. Aliases are listed in parentheses.</
 <div class="scroll"><table>
 <thead><tr><th>Field</th><th>Notes</th></tr></thead>
 <tbody>
-<tr><td><code>company</code></td><td>Falls back to Default Company.</td></tr>
+<tr><td><code>company</code></td><td>Falls back to Default Company. <strong>Created if it does not exist</strong> &mdash; and the response then says how to set ZATCA up for it. See <a href="#zatca-setup">Setting up ZATCA in ERPNext</a>.</td></tr>
 <tr><td><code>tax_id</code><br><small>vat_number, buyer_vat</small></td>
     <td>Buyer VAT. Also written to
         <code>Customer.custom_vat_registration_number</code>, which is what decides
@@ -945,6 +962,43 @@ create customers by any other route, set
 <code>custom_vat_registration_number</code> yourself.</p>
 </div>
 
+<h3 id="zatca-setup">Setting up ZATCA in ERPNext</h3>
+<p>This part cannot be done over the API: onboarding needs the taxpayer&rsquo;s one-time
+password from the Fatoora portal. It applies to any company with no ZATCA settings &mdash;
+above all one this API just created. <code>data.zatca.setup.steps</code> (and
+<code>zatca_setup</code> on a dry run) returns the same list.</p>
+<ol>
+<li><strong>Company.</strong> Open the company in ERPNext (Accounting &gt; Company), set its
+    Tax ID to the 15-digit VAT registration number (starts and ends with 3), and create an
+    Address linked to it: street, building number (4 digits), district, city, postal code
+    (5 digits), country.</li>
+<li><strong>Phase 2</strong> (invoices are cleared or reported to ZATCA). Search
+    <em>ZATCA Business Settings</em> in the awesomebar and create one for the company. Pick
+    the Company and Company Address; fill Seller Name, VAT Registration Number and the
+    Additional IDs (for example the commercial registration number); choose the Fatoora
+    Server (Sandbox, Simulation or Production), Type of Business Transactions and Sync with
+    ZATCA.</li>
+<li><strong>VAT account.</strong> On the same form switch on <em>Automatic VAT Account
+    Configuration</em> so the 15% VAT account and its Sales Taxes and Charges Template
+    exist. A new company has neither, and an invoice with no explicit taxes is rejected
+    without them.</li>
+<li><strong>Onboard.</strong> On the Integration tab run <em>Download and Set Up ZATCA
+    CLI</em>, get a one-time password from the Fatoora portal (fatoora.zatca.gov.sa) and
+    click <em>Onboard</em>. After the compliance checks pass, get a fresh OTP, click
+    <em>Get Production CSID</em> and set Status to Active.</li>
+<li><strong>Phase 1 instead</strong> (a QR code only, nothing sent to ZATCA): create
+    <em>ZATCA Phase 1 Business Settings</em> for the company, with its VAT registration
+    number and address. A company is Phase 1 or Phase 2, never both.</li>
+<li><strong>Until then, nothing is reported.</strong> An invoice submitted before the
+    settings are active is not filed with ZATCA. Send <code>"submit": false</code> so
+    invoices stay drafts, then call <code>submit_invoice</code> once the settings are
+    active. Use <code>resubmit_to_zatca</code> for any invoice whose filing failed.</li>
+</ol>
+<p>If the settings row already exists but has no production CSID &mdash; some benches create
+an empty one the moment a company is inserted &mdash; only steps 2 (complete it), 4 and 6
+apply, and <code>setup.phase</code> is <code>Phase 2</code> with <code>onboarded:
+false</code>.</p>
+
 <h3>Free-text address parsing</h3>
 <p>When the source system only exports one address line, enable <em>Parse Free-Text
 Address</em>. The built-in patterns handle ERPNext's own KSA layout:</p>
@@ -1059,7 +1113,12 @@ the people who own the feed can see why without access to the desk.</p>
         <code>"submit": false</code>.</td></tr>
 <tr><td><code>zatca.available = false</code>, reason mentions settings</td>
     <td>No active <code>ZATCA Business Settings</code> or
-        <code>ZATCA Phase 1 Business Settings</code> for the company.</td></tr>
+        <code>ZATCA Phase 1 Business Settings</code> for the company.
+        <code>zatca.setup.steps</code> lists what to do &mdash; see
+        <a href="#zatca-setup">Setting up ZATCA in ERPNext</a>.</td></tr>
+<tr><td>A warning says a company &ldquo;was created&rdquo;</td>
+    <td>The <code>company</code> in the payload did not exist. Check the spelling; if it is
+        right, set ZATCA up for it. A misspelt name creates a second company.</td></tr>
 <tr><td><code>integration_status</code> stuck at <code>Ready For Batch</code></td>
     <td>The background job has not run. Check the worker and scheduler are up, and
         <code>sync_with_zatca</code> on the business settings.</td></tr>

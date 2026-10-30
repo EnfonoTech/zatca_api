@@ -1,6 +1,6 @@
 # zatca_api/services/masters.py
 # Copyright (c) 2026, Enfono Technologies and contributors
-"""Idempotent master-data resolution: Customer, Address, Item, UOM, Project.
+"""Idempotent master-data resolution: Company, Customer, Address, Item, UOM, Project.
 
 Every function here is "ensure" shaped - it returns the name of an existing
 record or creates one, and calling it twice with the same input is a no-op the
@@ -8,10 +8,12 @@ second time.
 
 Two rules that the previous implementation broke and that matter here:
 
-* **Auto-creation is opt-in per master type.** A typo in an inbound UOM or item
-  group otherwise silently pollutes the master tables forever.
-* **Defaults come from settings, not from literals.** No ``"Riyadh"``,
-  ``"Services"`` or ``"Saudi Arabia"`` baked into the code.
+* **Auto-creation is opt-in per master type** (Company is the exception, see
+  :func:`ensure_company`). A typo in an inbound UOM or item group otherwise silently
+  pollutes the master tables forever.
+* **Defaults come from settings, not from literals.** No ``"Riyadh"`` or
+  ``"Services"`` baked into the code. The one exception is the country of a company
+  created on the fly, which falls back to Saudi Arabia because ZATCA is a Saudi regime.
 
 The ZATCA-specific part is :func:`ensure_customer`. `ksa_compliance` decides
 whether an invoice is *standard* (B2B, full buyer details, cleared) or
@@ -22,10 +24,13 @@ invoices to be filed as simplified, which is a compliance defect. This module
 writes both.
 """
 
+from typing import NamedTuple
+
 import frappe
 from frappe import _
 from frappe.utils import cint, cstr
 
+from zatca_api.services.envelope import clean_message
 from zatca_api.services.payload import PayloadError, apply_field_mappings
 from zatca_api.utils.addressing import (
     address_warnings,
@@ -33,23 +38,125 @@ from zatca_api.utils.addressing import (
     parse_address_text,
 )
 
+# A company created on the fly is a Saudi taxpayer unless ZATCA API Settings says otherwise:
+# ZATCA is a Saudi regime, so this is the one place a country literal is the right default.
+DEFAULT_COMPANY_COUNTRY = 'Saudi Arabia'
+DEFAULT_COMPANY_CURRENCY = 'SAR'
+
 # Customer.custom_additional_ids child rows use these ZATCA identification codes.
 # Source: ksa_compliance Additional Seller IDs / _get_buyer_other_id.
 ZATCA_BUYER_ID_TYPES = ('TIN', 'CRN', 'MOM', 'MLS', 'SAG', 'NAT', 'GCC', 'IQA', 'PAS', 'OTH')
 
 
-def ensure_company(payload: dict, settings) -> str:
-    company = (
-        payload.get('company') or settings.default_company or frappe.defaults.get_user_default('Company')
+class CompanyResolution(NamedTuple):
+    """The company an invoice is booked to, and whether this request had to create it."""
+
+    name: str
+    created: bool = False
+    abbr: str | None = None
+    currency: str | None = None
+    country: str | None = None
+
+
+def resolve_company_name(payload: dict, settings) -> str | None:
+    """The company name a payload points at, without touching the database."""
+    return (
+        cstr(payload.get('company')).strip()
+        or cstr(settings.default_company).strip()
+        or cstr(frappe.defaults.get_user_default('Company')).strip()
+        or None
     )
+
+
+def ensure_company(payload: dict, settings) -> CompanyResolution:
+    """Use the company if it exists, create it if it does not.
+
+    Unlike the other masters this is not gated by a ``Create Missing ...`` switch: an
+    integrator that names a company is asking for that company, and refusing the request
+    only makes them create it by hand before the first invoice can move.
+
+    What a created company does *not* have is any ZATCA setup, a VAT account or a Sales
+    Taxes and Charges Template. The caller reports that back (``zatca.setup_guidance``)
+    rather than pretending the company is ready.
+    """
+    company = resolve_company_name(payload, settings)
     if not company:
         raise PayloadError(
             _('No company in the payload and no Default Company set in ZATCA API Settings.'),
             {'field': 'company'},
         )
-    if not frappe.db.exists('Company', company):
-        raise PayloadError(_('Company {0} does not exist.').format(company), {'field': 'company'})
-    return company
+    if frappe.db.exists('Company', company):
+        return CompanyResolution(company)
+
+    return _create_company(company, settings)
+
+
+def _company_country(settings) -> str:
+    return cstr(settings.default_country).strip() or DEFAULT_COMPANY_COUNTRY
+
+
+def _company_currency(country: str) -> str:
+    """The currency a country reports in; SAR when it is not one frappe knows."""
+    from frappe.geo.country_info import get_country_info
+
+    return cstr((get_country_info(country) or {}).get('currency')).strip() or DEFAULT_COMPANY_CURRENCY
+
+
+def _unique_abbr(company_name: str) -> str:
+    """First letters of the words, made unique.
+
+    ERPNext refuses a second company with the same abbreviation, and derives its own
+    from the name when none is given, so a name that collides would fail the request
+    for a reason the caller cannot see. Account and warehouse names carry the
+    abbreviation, so it is kept short.
+    """
+    words = [word for word in cstr(company_name).split() if word[:1].isalnum()]
+    base = ''.join(word[0] for word in words).upper()[:5] or 'CO'
+
+    candidate, suffix = base, 1
+    while frappe.db.exists('Company', {'abbr': candidate}):
+        suffix += 1
+        candidate = f'{base}{suffix}'
+    return candidate
+
+
+def _create_company(company: str, settings) -> CompanyResolution:
+    country = _company_country(settings)
+    currency = _company_currency(country)
+
+    if not frappe.db.exists('Country', country):
+        raise PayloadError(
+            _(
+                'Company {0} does not exist and cannot be created: Default Country {1} is not a country.'
+            ).format(company, country),
+            {'field': 'company', 'value': company},
+        )
+    if not frappe.db.exists('Currency', currency):
+        raise PayloadError(
+            _('Company {0} does not exist and cannot be created: currency {1} is not set up.').format(
+                company, currency
+            ),
+            {'field': 'company', 'value': company},
+        )
+
+    doc = frappe.new_doc('Company')
+    doc.company_name = company
+    doc.abbr = _unique_abbr(company)
+    doc.default_currency = currency
+    doc.country = country
+
+    try:
+        doc.insert(ignore_permissions=True)
+    except (frappe.ValidationError, frappe.DuplicateEntryError) as exc:
+        # The caller rolls the request back, so a half-built company (chart of accounts,
+        # warehouses) does not survive. A duplicate here means another request created the
+        # same company a moment ago, and a retry will find it.
+        raise PayloadError(
+            _('Company {0} does not exist and could not be created: {1}').format(company, clean_message(exc)),
+            {'field': 'company', 'value': company},
+        ) from exc
+
+    return CompanyResolution(doc.name, True, doc.abbr, currency, country)
 
 
 def ensure_uom(uom: str, settings) -> str | None:

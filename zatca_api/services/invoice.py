@@ -554,16 +554,35 @@ def _refuse_kind_clash(existing: dict, payload: dict) -> None:
     )
 
 
+def company_created_warning(resolved, settings) -> str:
+    """Tell the caller a company was made for them, and that ZATCA is still to be set up."""
+    from zatca_api.services import zatca
+
+    message = _(
+        'Company {0} did not exist, so it was created (abbreviation {1}, currency {2}, country {3}).'
+    ).format(resolved.name, resolved.abbr, resolved.currency, resolved.country)
+
+    if zatca.setup_guidance(resolved.name, settings):
+        message += ' ' + _(
+            'ZATCA is still to be set up for it in ERPNext, and until it is, its invoices are not '
+            'reported to ZATCA. The steps are in data.zatca.setup of this response.'
+        )
+    return message
+
+
 def build_invoice(payload: dict, settings) -> tuple:
     """Create or update the Sales Invoice. Returns ``(InvoiceResult, warnings)``."""
     # Before validation: validate_invoice checks the original by ERPNext name only.
     resolve_return_against(payload)
     validate_invoice(payload)
 
-    company = masters.ensure_company(payload, settings)
+    resolved_company = masters.ensure_company(payload, settings)
+    company = resolved_company.name
     customer = masters.ensure_customer(payload, settings)
     address_result = masters.ensure_address(payload, customer, settings)
     warnings = list(address_result['warnings'])
+    if resolved_company.created:
+        warnings.insert(0, company_created_warning(resolved_company, settings))
     payload['_is_b2b'] = address_result.get('is_b2b')
 
     existing = find_by_external_id(payload['external_id'], lock=True)
